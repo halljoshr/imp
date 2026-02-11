@@ -1,49 +1,18 @@
 """Core provider abstractions.
 
-This module defines the base types for agent invocations:
-- TokenUsage: token counts and costs
-- AgentResult: structured output from agent invocations
+This module defines provider-specific types and abstractions:
 - AgentProvider: abstract base class for all provider implementations
 
-No pydantic-ai dependency here — pure foundation layer.
+Foundational types (TokenUsage, AgentResult) have been moved to imp.types
+and are re-exported here for backward compatibility.
 """
 
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel, ConfigDict
+# Re-export foundational types from imp.types for backward compatibility
+from imp.types import AgentResult, TokenUsage
 
-
-class TokenUsage(BaseModel):
-    """Token usage and cost tracking.
-
-    Maps directly to Pydantic AI RunUsage. Same shape for direct calls and managed executor.
-    All token counts default to 0 for easy initialization.
-    """
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    requests: int = 1
-    tool_calls: int = 0
-    cost_usd: float | None = None
-
-    model_config = ConfigDict(frozen=True)
-
-
-class AgentResult[OutputT](BaseModel):
-    """Result from an agent invocation.
-
-    Generic over output type to support both structured (BaseModel) and unstructured (str)
-    outputs.
-    """
-
-    output: OutputT
-    usage: TokenUsage
-    model: str
-    provider: str
-    duration_ms: int
+__all__ = ["AgentProvider", "AgentResult", "TokenUsage"]
 
 
 class AgentProvider[OutputT, DepsT](ABC):
