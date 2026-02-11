@@ -1,6 +1,5 @@
 """Tests for MetricsCollector."""
 
-
 from imp.metrics.collector import MetricsCollector
 from imp.metrics.models import EventType, MetricsEvent
 from imp.providers.base import AgentResult, TokenUsage

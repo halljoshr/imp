@@ -1,6 +1,5 @@
 """Tests for provider configuration models."""
 
-
 from imp.providers.config import ModelRoster, ProviderConfig
 
 

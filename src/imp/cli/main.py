@@ -65,8 +65,41 @@ app.add_typer(check_app, name="check")
 
 
 @check_app.callback(invoke_without_command=True)
-def check() -> None:
-    _not_implemented("check")
+def check(
+    gates: Annotated[
+        list[str] | None,
+        typer.Option("--gates", "-g", help="Specific gates to run (all if not specified)"),
+    ] = None,
+    fix: Annotated[
+        bool,
+        typer.Option("--fix", help="Attempt to auto-fix issues"),
+    ] = False,
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Run validation checks on the project."""
+    from pathlib import Path
+
+    from imp.validation.cli import check_command
+
+    # Determine project root
+    root = Path(project_root) if project_root else Path.cwd()
+
+    # Run validation
+    exit_code = check_command(
+        project_root=root,
+        gates=gates,
+        fix=fix,
+        format=format.value,
+    )
+
+    raise typer.Exit(exit_code)
 
 
 interview_app = typer.Typer(help="Run the interview agent.")

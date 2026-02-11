@@ -32,10 +32,17 @@ def test_init_not_implemented() -> None:
     assert "not implemented" in result.output.lower()
 
 
-def test_check_not_implemented() -> None:
+def test_check_implemented() -> None:
+    """Test that imp check command is implemented and runs."""
     result = runner.invoke(app, ["check"])
-    assert result.exit_code == 1
-    assert "not implemented" in result.output.lower()
+    # Exit code 1 means validation failed (which is expected - may have lint/type issues)
+    # Exit code 0 means validation passed
+    # Either is valid - what matters is that it ran
+    assert result.exit_code in (0, 1)
+    # Should show validation output, not "not implemented"
+    assert "not implemented" not in result.output.lower()
+    # Should show gate results or validation output
+    assert "validation" in result.output.lower() or "gate" in result.output.lower()
 
 
 def test_interview_not_implemented() -> None:
