@@ -116,8 +116,46 @@ app.add_typer(review_app, name="review")
 
 
 @review_app.callback(invoke_without_command=True)
-def review() -> None:
-    _not_implemented("review")
+def review(
+    files: Annotated[
+        list[str] | None,
+        typer.Argument(help="Files to review (all changed files if not specified)"),
+    ] = None,
+    provider: Annotated[
+        str,
+        typer.Option("--provider", help="AI provider (default: anthropic)"),
+    ] = "anthropic",
+    model: Annotated[
+        str,
+        typer.Option("--model", "-m", help="AI model (default: claude-opus-4-6)"),
+    ] = "claude-opus-4-6",
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Run AI code review on the project."""
+    from pathlib import Path
+
+    from imp.review.cli import review_command
+
+    # Determine project root
+    root = Path(project_root) if project_root else Path.cwd()
+
+    # Run review
+    exit_code = review_command(
+        project_root=root,
+        changed_files=files,
+        provider=provider,
+        model=model,
+        format=format.value,
+    )
+
+    raise typer.Exit(exit_code)
 
 
 metrics_app = typer.Typer(help="View and manage metrics.")
