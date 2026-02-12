@@ -50,7 +50,9 @@ def review_command(
 
         from imp.review.prompts import get_system_prompt
 
-        model_str = f"{provider}:{model}"
+        # Handle claude-agent-sdk separately (no provider prefix)
+        model_str = model if model == "claude-agent-sdk" else f"{provider}:{model}"
+
         ai_provider: PydanticAIProvider[ReviewResult, None] = PydanticAIProvider(
             model=cast(KnownModelName, model_str),
             output_type=ReviewResult,
