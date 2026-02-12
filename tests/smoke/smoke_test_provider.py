@@ -255,6 +255,61 @@ def test_provider_config():
         return False
 
 
+async def test_claude_sdk_integration():
+    """Test: claude-agent-sdk integration (if installed)."""
+    try:
+        # Try to import claude-agent-sdk
+        try:
+            import claude_agent_sdk  # noqa: F401
+
+            sdk_available = True
+        except ImportError:
+            sdk_available = False
+
+        if not sdk_available:
+            print("⊘ claude-agent-sdk not installed (skipping)")
+            return True  # Not a failure, just not installed
+
+        # If SDK is available, test it
+        from unittest.mock import patch
+
+        from imp.providers import PydanticAIProvider
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = "SDK integration test response"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Create provider with claude-agent-sdk model
+            provider = PydanticAIProvider(
+                model="claude-agent-sdk",
+                output_type=str,
+                system_prompt="Test system prompt",
+            )
+
+            result = await provider.invoke("Test prompt")
+
+            # Validate result
+            assert isinstance(result.output, str), "Output should be string"
+            assert result.model == "claude-code-cli", "Model should be claude-code-cli"
+            assert result.provider == "claude-agent-sdk", "Provider should be claude-agent-sdk"
+            assert result.usage.cost_usd == 0.0, "Cost should be 0 (Max subscription)"
+
+        print("✓ claude-agent-sdk integration working")
+        return True
+    except Exception as e:
+        print(f"✗ claude-agent-sdk integration failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 async def run_all_tests():
     """Run all smoke tests in sequence."""
     print("=" * 60)
@@ -289,6 +344,9 @@ async def run_all_tests():
 
     # Test 8: Provider config
     results.append(test_provider_config())
+
+    # Test 9: claude-agent-sdk integration
+    results.append(await test_claude_sdk_integration())
 
     print()
     print("=" * 60)

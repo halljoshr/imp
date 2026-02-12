@@ -1,6 +1,7 @@
 """Pydantic AI provider implementation.
 
 Wraps Pydantic AI Agent for standardized usage tracking, cost calculation, and timing.
+Supports both standard Pydantic AI providers and claude-agent-sdk integration.
 """
 
 import time
@@ -13,27 +14,65 @@ from pydantic_ai.models.test import TestModel
 from imp.providers.base import AgentProvider, AgentResult, TokenUsage
 from imp.providers.pricing import calculate_cost
 
+# Import claude-agent-sdk model if available
+try:
+    from imp.providers.claude_sdk_model import ClaudeAgentSDKModel
+
+    CLAUDE_SDK_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    CLAUDE_SDK_AVAILABLE = False
+    ClaudeAgentSDKModel = None  # type: ignore
+
 
 class PydanticAIProvider[OutputT, DepsT](AgentProvider[OutputT, DepsT]):
     """Pydantic AI implementation of AgentProvider.
 
     Wraps Pydantic AI Agent to provide standardized usage tracking, cost calculation,
     and performance metrics.
+
+    Supports:
+    - Standard Pydantic AI providers (18+ models via shorthand notation)
+    - claude-agent-sdk integration (Max subscription usage)
+
+    Example:
+        # Standard provider (API key required)
+        provider = PydanticAIProvider(
+            model="anthropic:claude-opus-4-6",
+            output_type=str
+        )
+
+        # claude-agent-sdk (Max subscription, no API key)
+        provider = PydanticAIProvider(
+            model="claude-agent-sdk",
+            output_type=str
+        )
     """
 
     def __init__(
         self,
-        model: Model | KnownModelName | TestModel,
+        model: Model | KnownModelName | TestModel | str,
         output_type: type[OutputT],
         system_prompt: str = "",
     ) -> None:
         """Initialize provider with model and output type.
 
         Args:
-            model: Pydantic AI model (Model, shorthand string, or TestModel)
+            model: Pydantic AI model (Model, shorthand string, TestModel, or "claude-agent-sdk")
             output_type: Type of structured output (str, BaseModel subclass, etc.)
             system_prompt: Optional system prompt for the agent
+
+        Raises:
+            ImportError: If model="claude-agent-sdk" but SDK not installed
         """
+        # Detect claude-agent-sdk model string
+        if isinstance(model, str) and model == "claude-agent-sdk":
+            if not CLAUDE_SDK_AVAILABLE:  # pragma: no cover
+                raise ImportError(
+                    "claude-agent-sdk is not installed. Install with: pip install impx[claude-sdk]"
+                )
+            # Create ClaudeAgentSDKModel instance
+            model = ClaudeAgentSDKModel()
+
         self._agent: Agent[DepsT, OutputT] = Agent(
             model=model, output_type=output_type, system_prompt=system_prompt
         )
@@ -41,7 +80,9 @@ class PydanticAIProvider[OutputT, DepsT](AgentProvider[OutputT, DepsT]):
         # Extract model and provider names for result metadata
         self._model_name, self._provider_name = self._parse_model_name(model)
 
-    def _parse_model_name(self, model: Model | KnownModelName | TestModel) -> tuple[str, str]:
+    def _parse_model_name(
+        self, model: Model | KnownModelName | TestModel | str
+    ) -> tuple[str, str]:
         """Extract model name and provider from model identifier.
 
         Args:
@@ -50,6 +91,10 @@ class PydanticAIProvider[OutputT, DepsT](AgentProvider[OutputT, DepsT]):
         Returns:
             Tuple of (model_name, provider_name)
         """
+        # Handle ClaudeAgentSDKModel
+        if CLAUDE_SDK_AVAILABLE and isinstance(model, ClaudeAgentSDKModel):
+            return (model.model_name, model.system)
+
         if isinstance(model, TestModel):
             return ("test", "test")
 
