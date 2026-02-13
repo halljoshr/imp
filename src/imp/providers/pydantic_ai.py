@@ -71,6 +71,8 @@ class PydanticAIProvider[OutputT, DepsT](AgentProvider[OutputT, DepsT]):
                     "claude-agent-sdk is not installed. Install with: pip install impx[claude-sdk]"
                 )
             # Create ClaudeAgentSDKModel instance
+            # Structured output is handled by ClaudeAgentSDKModel.request()
+            # which extracts output_object from model_request_parameters
             model = ClaudeAgentSDKModel()
 
         self._agent: Agent[DepsT, OutputT] = Agent(

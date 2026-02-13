@@ -310,6 +310,89 @@ async def test_claude_sdk_integration():
         return False
 
 
+async def test_imp_review_with_claude_sdk():
+    """Test: imp review with claude-agent-sdk model end-to-end.
+
+    This validates the full pipeline:
+    CLI → ReviewRunner → PydanticAIProvider → ClaudeAgentSDKModel → SDK → ReviewResult
+
+    Tests structured output support for ReviewResult with claude-agent-sdk.
+    """
+    try:
+        # Check if SDK is available
+        try:
+            import claude_agent_sdk  # noqa: F401
+
+            sdk_available = True
+        except ImportError:
+            sdk_available = False
+
+        if not sdk_available:
+            print("⊘ claude-agent-sdk not installed (skipping review test)")
+            return True  # Not a failure
+
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from imp.providers import PydanticAIProvider
+        from imp.review.models import ReviewResult
+        from imp.review.runner import ReviewRunner
+
+        # Create a realistic ReviewResult JSON that SDK would return
+        review_json = """{
+            "passed": true,
+            "issues": [],
+            "handoff": null,
+            "validation_passed": true,
+            "duration_ms": 100
+        }"""
+
+        # Mock the SDK to return our JSON
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = review_json
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Create provider with ReviewResult output type
+            provider = PydanticAIProvider(
+                model="claude-agent-sdk",
+                output_type=ReviewResult,
+                system_prompt="You are a code reviewer.",
+            )
+
+            # Create ReviewRunner with the provider
+            runner = ReviewRunner(
+                project_root=Path("/tmp/test"),
+                provider=provider,
+            )
+
+            # Run Pass 2 (AI review) directly to test structured output
+            result = await runner.run_pass_two(changed_files=["test.py"])
+
+            # Validate result structure
+            assert isinstance(result, ReviewResult), "Output should be ReviewResult"
+            assert result.passed is True, "Review should pass"
+            assert result.issues == [], "Should have no issues"
+            assert result.handoff is None, "Should have no handoff"
+            assert result.validation_passed is True, "Validation should pass"
+            assert result.model == "claude-code-cli", "Model should be claude-code-cli"
+            assert result.provider == "claude-agent-sdk", "Provider should be claude-agent-sdk"
+
+        print("✓ imp review --model claude-agent-sdk end-to-end working")
+        return True
+    except Exception as e:
+        print(f"✗ imp review with claude-agent-sdk failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 async def run_all_tests():
     """Run all smoke tests in sequence."""
     print("=" * 60)
@@ -347,6 +430,9 @@ async def run_all_tests():
 
     # Test 9: claude-agent-sdk integration
     results.append(await test_claude_sdk_integration())
+
+    # Test 10: imp review with claude-agent-sdk
+    results.append(await test_imp_review_with_claude_sdk())
 
     print()
     print("=" * 60)

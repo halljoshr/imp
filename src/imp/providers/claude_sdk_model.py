@@ -7,6 +7,7 @@ allowing Max subscription usage through the standard provider abstraction.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ class ClaudeAgentSDKModel(Model):
     This allows using Claude Max subscription quota through Pydantic AI's
     abstraction layer, maintaining usage tracking and provider consistency.
 
+    Supports structured output via claude-agent-sdk's output_format parameter.
+
     Note: claude-agent-sdk must be installed separately:
         pip install claude-agent-sdk>=0.1.35
     """
@@ -62,11 +65,10 @@ class ClaudeAgentSDKModel(Model):
         self._cli_path = cli_path
 
         # Define model capabilities
-        # NOTE: claude-agent-sdk has built-in tools, but we're using it as a
-        # simple completion model through Pydantic AI
         profile = ModelProfile(
-            supports_tools=False,  # SDK has its own tool system
-            supports_json_schema_output=False,  # No native structured output
+            supports_tools=False,  # SDK has its own tool system (not using for now)
+            supports_json_schema_output=True,  # Native JSON schema via output_format
+            default_structured_output_mode="native",  # Use native JSON schema by default
         )
 
         super().__init__(profile=profile)
@@ -89,6 +91,10 @@ class ClaudeAgentSDKModel(Model):
         Returns:
             ModelResponse with completion text and usage estimates
         """
+        # Check for structured output request BEFORE prepare_request
+        # (prepare_request may clear it for some model types)
+        output_object = model_request_parameters.output_object
+
         # REQUIRED: Always call prepare_request first (merges settings, validates)
         model_settings, model_request_parameters = self.prepare_request(
             model_settings, model_request_parameters
@@ -98,25 +104,28 @@ class ClaudeAgentSDKModel(Model):
         instructions = self._get_instructions(messages, model_request_parameters)
 
         # Build the prompt for claude-agent-sdk
-        # NOTE: SDK expects a single string prompt, not chat messages
-        prompt_parts = []
-
-        # Add system prompt if present
-        if instructions:
-            prompt_parts.append(f"System: {instructions}")
-
-        # Add message history
-        for msg in messages:
-            if hasattr(msg, "role") and hasattr(msg, "content"):
-                prompt_parts.append(f"{msg.role}: {msg.content}")
-
-        full_prompt = "\n\n".join(prompt_parts)
+        full_prompt = self._build_prompt(messages, instructions)
 
         # Track timing
         start = time.monotonic()
 
         # Configure SDK options
-        options = ClaudeAgentOptions(cli_path=self._cli_path) if self._cli_path else None
+        if output_object is not None:
+            # Structured output mode - extract and pass JSON schema
+            # output_object can be either a Pydantic BaseModel class or OutputObjectDefinition
+            if hasattr(output_object, "model_json_schema"):
+                # Pydantic BaseModel class - extract schema
+                schema = output_object.model_json_schema()
+            else:
+                # OutputObjectDefinition - schema already extracted
+                schema = output_object.json_schema
+            # Wrap schema in Messages API structure (required by SDK)
+            # SDK expects: {"type": "json_schema", "schema": {actual_schema}}
+            output_format = {"type": "json_schema", "schema": schema}
+            options = ClaudeAgentOptions(cli_path=self._cli_path, output_format=output_format)
+        else:
+            # Text completion mode
+            options = ClaudeAgentOptions(cli_path=self._cli_path)
 
         # Make the request via claude-agent-sdk
         # NOTE: Isolate the SDK call to avoid async context manager conflicts
@@ -124,6 +133,27 @@ class ClaudeAgentSDKModel(Model):
 
         # Calculate duration
         duration_ms = int((time.monotonic() - start) * 1000)
+
+        # FALLBACK: SDK may wrap structured output in markdown in some cases.
+        # Extract JSON from markdown wrapper if present.
+        # NOTE: SDK normally returns structured_output directly (see _call_sdk_isolated)
+        if (
+            output_object is not None and result_text and not result_text.startswith("Error")
+        ):  # pragma: no cover
+            # Check for markdown JSON wrapper: ```json\n{...}\n```
+            if result_text.strip().startswith("```json"):  # pragma: no cover
+                # Extract JSON from markdown code block
+                match = re.search(r"```json\s*\n(.*?)\n```", result_text, re.DOTALL)
+                if match:  # pragma: no cover
+                    result_text = match.group(1).strip()
+
+            # Validate extracted JSON
+            try:
+                json.loads(result_text)  # Validate JSON syntax
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"claude-agent-sdk returned invalid JSON for structured output: {e}"
+                ) from e
 
         # Estimate token usage (SDK doesn't expose real counts)
         usage = self._estimate_usage(messages, result_text)
@@ -149,6 +179,31 @@ class ClaudeAgentSDKModel(Model):
         """The provider identifier (used for OpenTelemetry, metrics)."""
         return "claude-agent-sdk"
 
+    def _build_prompt(self, messages: list[ModelMessage], instructions: str | None) -> str:
+        """Build full prompt string from messages and instructions.
+
+        Extracted for testability and clarity.
+
+        Args:
+            messages: List of conversation messages
+            instructions: Optional system instructions
+
+        Returns:
+            Full prompt string for claude-agent-sdk
+        """
+        prompt_parts = []
+
+        # Add system prompt if present
+        if instructions:
+            prompt_parts.append(f"System: {instructions}")
+
+        # Add message history
+        for msg in messages:
+            if hasattr(msg, "role") and hasattr(msg, "content"):
+                prompt_parts.append(f"{msg.role}: {msg.content}")
+
+        return "\n\n".join(prompt_parts)
+
     async def _call_sdk_isolated(self, prompt: str, options: ClaudeAgentOptions | None) -> str:
         """Call claude-agent-sdk in an isolated async context.
 
@@ -166,10 +221,14 @@ class ClaudeAgentSDKModel(Model):
         async def _consume_stream() -> str:
             """Consume the SDK stream in a separate task."""
             chunks: list[str] = []
+            result_message = None
             try:
                 async for chunk in query(prompt=prompt, options=options):
+                    # Check for ResultMessage with structured_output
+                    if type(chunk).__name__ == "ResultMessage":
+                        result_message = chunk
                     # Extract text content from different chunk types
-                    if hasattr(chunk, "content"):
+                    elif hasattr(chunk, "content"):
                         # AssistantMessage, SystemMessage, etc.
                         chunks.append(str(chunk.content))
                     elif isinstance(chunk, str):
@@ -179,6 +238,15 @@ class ClaudeAgentSDKModel(Model):
                         chunks.append(str(chunk))
             except Exception as e:
                 return f"Error from claude-agent-sdk: {e}"
+
+            # If structured output is available, return it as JSON
+            if (
+                result_message
+                and hasattr(result_message, "structured_output")
+                and result_message.structured_output is not None
+            ):
+                return json.dumps(result_message.structured_output)
+
             return "".join(chunks)
 
         # Run in a separate task to isolate the async context

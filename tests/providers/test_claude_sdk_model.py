@@ -33,7 +33,14 @@ class TestClaudeAgentSDKModel:
         model = ClaudeAgentSDKModel()
         # Access the profile through the Model superclass
         assert model.profile.supports_tools is False
-        assert model.profile.supports_json_schema_output is False
+        assert model.profile.supports_json_schema_output is True
+
+    def test_model_profile_supports_json_schema_output(self) -> None:
+        """Model profile reports supports_json_schema_output=True after implementation."""
+        model = ClaudeAgentSDKModel()
+        # After implementation, this should be True
+        # Currently expected to FAIL (TDD - test written before implementation)
+        assert model.profile.supports_json_schema_output is True
 
     @pytest.mark.asyncio
     async def test_request_returns_model_response(self) -> None:
@@ -302,6 +309,262 @@ class TestClaudeAgentSDKModel:
                 prompt = call_args.kwargs.get("prompt", "")
                 # The message formatting line should be covered
                 assert "user: Test message" in prompt
+
+
+class TestClaudeAgentSDKModelStructuredOutput:
+    """Test JSON schema output support for structured data."""
+
+    @pytest.mark.asyncio
+    async def test_request_with_output_object_passes_schema_to_sdk(self) -> None:
+        """Request with output_object passes output_format to ClaudeAgentOptions."""
+        from pydantic import BaseModel
+
+        class TestSchema(BaseModel):
+            message: str
+            score: int
+
+        model = ClaudeAgentSDKModel()
+
+        with (
+            patch("imp.providers.claude_sdk_model.query") as mock_query,
+            patch("imp.providers.claude_sdk_model.ClaudeAgentOptions") as mock_options,
+        ):
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = '{"message": "test", "score": 42}'
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Create request parameters with output_object
+            params = ModelRequestParameters(output_object=TestSchema)
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+                # Verify ClaudeAgentOptions was called with output_format
+                assert mock_options.call_count == 1
+                call_kwargs = mock_options.call_args.kwargs
+                assert "output_format" in call_kwargs
+                # Should be wrapped in Messages API structure
+                assert isinstance(call_kwargs["output_format"], dict)
+                assert call_kwargs["output_format"]["type"] == "json_schema"
+                assert "schema" in call_kwargs["output_format"]
+                assert "properties" in call_kwargs["output_format"]["schema"]
+
+    @pytest.mark.asyncio
+    async def test_request_with_output_object_returns_json_as_text(self) -> None:
+        """Request with output_object extracts JSON from markdown wrapper."""
+        from pydantic import BaseModel
+
+        class TestSchema(BaseModel):
+            message: str
+            score: int
+
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+            # SDK returns ResultMessage with structured_output (actual SDK behavior)
+            async def mock_iterator():
+                # Mock ResultMessage with structured_output
+                class ResultMessage:
+                    def __init__(self) -> None:
+                        self.structured_output = {"message": "test", "score": 42}
+
+                yield ResultMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            params = ModelRequestParameters(output_object=TestSchema)
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                response = await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+                # Expected to FAIL until implementation
+                # Should return JSON string as TextPart
+                assert len(response.parts) == 1
+                assert isinstance(response.parts[0], TextPart)
+                # Content should be valid JSON
+                import json
+
+                parsed = json.loads(response.parts[0].content)
+                assert parsed["message"] == "test"
+                assert parsed["score"] == 42
+
+    @pytest.mark.asyncio
+    async def test_request_with_output_object_invalid_json_raises(self) -> None:
+        """Request with output_object raises ValueError when SDK returns invalid JSON."""
+        from pydantic import BaseModel
+
+        class TestSchema(BaseModel):
+            message: str
+            score: int
+
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+            # SDK returns non-JSON text
+            async def mock_iterator():
+                class MockMessage:
+                    content = "This is not JSON"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            params = ModelRequestParameters(output_object=TestSchema)
+
+            with (
+                patch.object(model, "_get_instructions", return_value=None),
+                pytest.raises(ValueError, match="invalid JSON"),
+            ):
+                await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+    @pytest.mark.asyncio
+    async def test_request_without_output_object_works_normally(self) -> None:
+        """Request without output_object continues to work (backward compatibility)."""
+        model = ClaudeAgentSDKModel()
+
+        with (
+            patch("imp.providers.claude_sdk_model.query") as mock_query,
+            patch("imp.providers.claude_sdk_model.ClaudeAgentOptions") as mock_options,
+        ):
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = "Regular text response"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Request WITHOUT output_object
+            params = ModelRequestParameters()
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                response = await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+                # Should work normally, returning text
+                assert len(response.parts) == 1
+                assert response.parts[0].content == "Regular text response"
+
+                # ClaudeAgentOptions should NOT have output_format
+                call_kwargs = mock_options.call_args.kwargs
+                assert (
+                    "output_format" not in call_kwargs or call_kwargs.get("output_format") is None
+                )
+
+    @pytest.mark.asyncio
+    async def test_request_extracts_schema_from_basemodel(self) -> None:
+        """Request correctly extracts JSON schema from Pydantic BaseModel."""
+        from pydantic import BaseModel, Field
+
+        class ComplexSchema(BaseModel):
+            """A complex schema for testing."""
+
+            name: str = Field(description="The name field")
+            value: int = Field(ge=0, le=100, description="Value between 0-100")
+            tags: list[str] = Field(default_factory=list)
+
+        model = ClaudeAgentSDKModel()
+
+        with (
+            patch("imp.providers.claude_sdk_model.query") as mock_query,
+            patch("imp.providers.claude_sdk_model.ClaudeAgentOptions") as mock_options,
+        ):
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = '{"name": "test", "value": 50, "tags": []}'
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            params = ModelRequestParameters(output_object=ComplexSchema)
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+                # Verify schema was extracted correctly
+                call_kwargs = mock_options.call_args.kwargs
+                output_format = call_kwargs["output_format"]
+
+                # Should be wrapped in Messages API structure
+                assert output_format["type"] == "json_schema"
+                assert "schema" in output_format
+                schema = output_format["schema"]
+
+                # Should have proper JSON schema structure
+                assert "type" in schema
+                assert schema["type"] == "object"
+                assert "properties" in schema
+                assert "name" in schema["properties"]
+                assert "value" in schema["properties"]
+                assert "tags" in schema["properties"]
+                # Should include field constraints/descriptions
+                assert schema["properties"]["value"].get("minimum") == 0
+                assert schema["properties"]["value"].get("maximum") == 100
+
+    @pytest.mark.asyncio
+    async def test_request_with_output_object_none_cli_path(self) -> None:
+        """Request with output_object and no custom cli_path works correctly."""
+        from pydantic import BaseModel
+
+        class TestSchema(BaseModel):
+            result: str
+
+        model = ClaudeAgentSDKModel()  # No cli_path specified
+
+        with (
+            patch("imp.providers.claude_sdk_model.query") as mock_query,
+            patch("imp.providers.claude_sdk_model.ClaudeAgentOptions") as mock_options,
+        ):
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = '{"result": "success"}'
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            params = ModelRequestParameters(output_object=TestSchema)
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                await model.request(
+                    messages=[],
+                    model_settings=None,
+                    model_request_parameters=params,
+                )
+
+                # Expected to FAIL until implementation
+                # Should still pass schema even without custom cli_path
+                call_kwargs = mock_options.call_args.kwargs
+                assert "output_format" in call_kwargs
+                assert call_kwargs["cli_path"] is None
 
 
 class TestClaudeAgentSDKModelWithSystemPrompt:
