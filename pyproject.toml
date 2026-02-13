@@ -81,7 +81,7 @@ omit = [
     "src/imp/cli/main.py",
     "src/imp/context/*",
     "src/imp/validation/*",
-    "src/imp/interview/*",
+    "src/imp/interview/skills/*",
     "src/imp/pm/*",
     "src/imp/review/*",
     "src/imp/executor/*",

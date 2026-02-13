@@ -41,10 +41,12 @@ def test_check_implemented() -> None:
     assert "check" in result.output.lower()
 
 
-def test_interview_not_implemented() -> None:
-    result = runner.invoke(app, ["interview"])
-    assert result.exit_code == 1
-    assert "not implemented" in result.output.lower()
+def test_interview_implemented() -> None:
+    """Test that imp interview command is implemented."""
+    result = runner.invoke(app, ["interview", "--help"])
+    assert result.exit_code == 0
+    assert "validate" in result.output.lower()
+    assert "import" in result.output.lower()
 
 
 def test_review_implemented() -> None:

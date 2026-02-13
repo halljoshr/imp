@@ -102,13 +102,68 @@ def check(
     raise typer.Exit(exit_code)
 
 
-interview_app = typer.Typer(help="Run the interview agent.")
+interview_app = typer.Typer(help="Interview spec validation and import.")
 app.add_typer(interview_app, name="interview")
 
 
 @interview_app.callback(invoke_without_command=True)
-def interview() -> None:
-    _not_implemented("interview")
+def interview(ctx: typer.Context) -> None:
+    """Interview spec validation and import tools."""
+    if ctx.invoked_subcommand is None:
+        rprint("Use [bold]imp interview validate[/bold] or [bold]imp interview import[/bold].")
+        rprint("Run [bold]imp interview --help[/bold] for details.")
+        raise typer.Exit(0)
+
+
+@interview_app.command("validate")
+def interview_validate(
+    spec_file: Annotated[
+        str,
+        typer.Argument(help="Path to the spec JSON file to validate"),
+    ],
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+) -> None:
+    """Validate an interview spec file for completeness."""
+    from pathlib import Path
+
+    from imp.interview.cli import validate_command
+
+    exit_code = validate_command(
+        spec_file=Path(spec_file),
+        format=format.value,
+    )
+    raise typer.Exit(exit_code)
+
+
+@interview_app.command("import")
+def interview_import(
+    spec_file: Annotated[
+        str,
+        typer.Argument(help="Path to the spec JSON file to import"),
+    ],
+    output_dir: Annotated[
+        str | None,
+        typer.Option("--output-dir", "-o", help="Directory to import into"),
+    ] = None,
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+) -> None:
+    """Import a validated spec into the pipeline."""
+    from pathlib import Path
+
+    from imp.interview.cli import import_command
+
+    exit_code = import_command(
+        spec_file=Path(spec_file),
+        output_dir=Path(output_dir) if output_dir else None,
+        format=format.value,
+    )
+    raise typer.Exit(exit_code)
 
 
 review_app = typer.Typer(help="Run code review.")
