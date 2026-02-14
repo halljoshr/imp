@@ -26,10 +26,13 @@ def test_subcommands_listed_in_help() -> None:
         assert cmd in result.output
 
 
-def test_init_not_implemented() -> None:
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == 1
-    assert "not implemented" in result.output.lower()
+def test_init_implemented() -> None:
+    """Test that imp init command is implemented."""
+    # Test with --help to verify command exists without running full init
+    result = runner.invoke(app, ["init", "--help"])
+    assert result.exit_code == 0
+    assert "not implemented" not in result.output.lower()
+    assert "init" in result.output.lower()
 
 
 def test_check_implemented() -> None:

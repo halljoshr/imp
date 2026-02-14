@@ -51,13 +51,26 @@ def _not_implemented(name: str) -> None:
 
 # --- Subcommand groups ---
 
-init_app = typer.Typer(help="Initialize imp in a project.")
-app.add_typer(init_app, name="init")
 
+@app.command("init")
+def init(
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+) -> None:
+    """Initialize project indexes for context-efficient navigation."""
+    from pathlib import Path
 
-@init_app.callback(invoke_without_command=True)
-def init() -> None:
-    _not_implemented("init")
+    from imp.context.cli import init_command
+
+    root = Path(project_root) if project_root else Path.cwd()
+    exit_code = init_command(root=root, format=format.value)
+    raise typer.Exit(exit_code)
 
 
 check_app = typer.Typer(help="Run validation checks.")

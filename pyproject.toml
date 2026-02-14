@@ -33,6 +33,10 @@ claude-sdk = [
 plane = [
     "plane-sdk>=0.2.6",
 ]
+tree-sitter = [
+    "tree-sitter>=0.23",
+    "tree-sitter-typescript>=0.23",
+]
 
 [project.scripts]
 imp = "imp.cli.main:app"
@@ -82,7 +86,6 @@ asyncio_mode = "auto"
 omit = [
     # Omit unimplemented modules until they're built
     "src/imp/cli/main.py",
-    "src/imp/context/*",
     "src/imp/validation/*",
     "src/imp/interview/skills/*",
     "src/imp/pm/cli.py",
