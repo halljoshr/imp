@@ -18,5 +18,8 @@ htmlcov/
 # Virtual environments
 .venv/
 
+# Environment variables
+.env
+
 # Imp
 .imp-metrics/

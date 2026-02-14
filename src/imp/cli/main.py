@@ -213,6 +213,44 @@ def review(
     raise typer.Exit(exit_code)
 
 
+@app.command("plan")
+def plan(
+    spec_file: Annotated[
+        str,
+        typer.Argument(help="Path to the interview spec JSON file"),
+    ],
+    provider: Annotated[
+        str,
+        typer.Option("--provider", help="PM provider (default: plane)"),
+    ] = "plane",
+    parent: Annotated[
+        bool,
+        typer.Option("--parent/--no-parent", help="Create parent epic ticket"),
+    ] = True,
+    priority: Annotated[
+        str,
+        typer.Option("--priority", help="Default ticket priority"),
+    ] = "medium",
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+) -> None:
+    """Generate PM tickets from an interview spec."""
+    from pathlib import Path
+
+    from imp.pm.cli import plan_command
+
+    exit_code = plan_command(
+        spec_file=Path(spec_file),
+        provider=provider,
+        create_parent=parent,
+        default_priority=priority,
+        format=format.value,
+    )
+    raise typer.Exit(exit_code)
+
+
 metrics_app = typer.Typer(help="View and manage metrics.")
 app.add_typer(metrics_app, name="metrics")
 

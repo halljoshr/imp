@@ -30,6 +30,9 @@ dependencies = [
 claude-sdk = [
     "claude-agent-sdk>=0.1.35",
 ]
+plane = [
+    "plane-sdk>=0.2.6",
+]
 
 [project.scripts]
 imp = "imp.cli.main:app"
@@ -82,7 +85,7 @@ omit = [
     "src/imp/context/*",
     "src/imp/validation/*",
     "src/imp/interview/skills/*",
-    "src/imp/pm/*",
+    "src/imp/pm/cli.py",
     "src/imp/review/*",
     "src/imp/executor/*",
 ]
@@ -105,7 +108,8 @@ name = "Layered architecture"
 type = "layers"
 layers = [
     "imp.cli",
-    "imp.executor | imp.review | imp.interview | imp.pm",
+    "imp.executor | imp.review | imp.pm",
+    "imp.interview",
     "imp.validation",
     "imp.providers | imp.metrics | imp.context",
     "imp.types",

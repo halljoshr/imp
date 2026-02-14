@@ -1,0 +1,50 @@
+{
+  "name": "Imp v0.1 — PM Integration",
+  "problem_statement": "Engineering teams need a way to automatically generate PM tickets from interview specs, so that requirements flow directly into project management without manual transcription.",
+  "system_overview": "PM Integration module that transforms InterviewSpec objects into work items in Plane (or other PM tools) via an adapter pattern.",
+  "components": [
+    {
+      "name": "PMAdapter ABC",
+      "purpose": "Abstract interface for PM tool integrations, enabling plug-and-play support for Plane, Linear, and future tools.",
+      "inputs": ["TicketSpec with title, description, priority, labels"],
+      "outputs": ["TicketRef with ticket_id and URL"],
+      "constraints": ["Must support async-ready patterns", "Rate limiting per provider"],
+      "edge_cases": ["API timeout mid-creation", "Duplicate ticket detection", "Invalid credentials"],
+      "success_criteria": ["Any PMAdapter implementation can be swapped without changing caller code", "All SDK exceptions wrapped in PMError"]
+    },
+    {
+      "name": "PlaneAdapter",
+      "purpose": "Concrete PMAdapter implementation wrapping plane-sdk for self-hosted Plane instances.",
+      "inputs": ["PlaneConfig with API key, workspace slug, project ID", "TicketSpec objects"],
+      "outputs": ["TicketRef objects", "Ticket objects with full state"],
+      "constraints": ["60 req/min rate limit", "plane-sdk as optional dependency"],
+      "edge_cases": ["SDK not installed", "State UUID lookup failure", "Network errors"],
+      "success_criteria": ["Creates work items in Plane via API", "Caches state UUIDs after first lookup", "Graceful degradation when SDK missing"]
+    },
+    {
+      "name": "Spec-to-Tickets Mapper",
+      "purpose": "Transform InterviewSpec components into structured TicketSpec objects with Markdown descriptions and traceability.",
+      "inputs": ["InterviewSpec with components, problem statement, success criteria"],
+      "outputs": ["List of TicketSpec objects with parent/child relationships"],
+      "constraints": ["Preserve component order", "All tickets must have traceability fields"],
+      "edge_cases": ["Empty spec with no components", "Components with minimal fields"],
+      "success_criteria": ["Parent ticket contains spec-level info", "Each component maps to one ticket", "source_spec_name and source_component_name set on every ticket"]
+    }
+  ],
+  "success_criteria": [
+    "imp plan generates tickets in Plane from any valid InterviewSpec",
+    "Tickets appear with correct hierarchy (parent + children)",
+    "Markdown descriptions render in Plane UI",
+    "Full traceability from ticket back to source spec"
+  ],
+  "out_of_scope": [
+    "Linear adapter (built later)",
+    "Bidirectional sync (Plane changes back to spec)",
+    "Real-time status updates"
+  ],
+  "constraints": [
+    "plane-sdk v0.2.6 as optional dependency",
+    "Must work without Plane installed (graceful degradation)",
+    "Rate limiting: 60 requests per minute"
+  ]
+}

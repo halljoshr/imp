@@ -1269,6 +1269,9 @@ dependencies = [
 claude-sdk = [
     { name = "claude-agent-sdk" },
 ]
+plane = [
+    { name = "plane-sdk" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1283,12 +1286,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'claude-sdk'", specifier = ">=0.1.35" },
+    { name = "plane-sdk", marker = "extra == 'plane'", specifier = ">=0.2.6" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "typer", extras = ["all"], specifier = ">=0.9" },
 ]
-provides-extras = ["claude-sdk"]
+provides-extras = ["claude-sdk", "plane"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2054,6 +2058,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fa/2a/52a8da6fe965dea6192eb716b357558e103aea0a1e9a8352ad575a8406ca/pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177", size = 63262, upload-time = "2025-06-15T09:07:20.736Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9a/70/875f4a23bfc4731703a5835487d0d2fb999031bd415e7d17c0ae615c18b7/pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f", size = 24305, upload-time = "2025-06-15T09:07:19.117Z" },
+]
+
+[[package]]
+name = "plane-sdk"
+version = "0.2.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/2e/3ab01274ec22912725cddbb4cdeacf95c7ff673328702ad1fbb371f52062/plane_sdk-0.2.6.tar.gz", hash = "sha256:17be008d94e398c8cd1ba10686a767906b313aae5382e2f3cf0e3066074ee0af", size = 47581, upload-time = "2026-02-10T16:53:52.433Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/24/c185e629c1a97c46b9869ea80abe9b47080f625556426c9621e0a32bb4b0/plane_sdk-0.2.6-py3-none-any.whl", hash = "sha256:41bc019db35ba5a5834d7b072ef102721f3e274162253e5d0da1831a52c3a1a4", size = 70967, upload-time = "2026-02-10T16:53:51.098Z" },
 ]
 
 [[package]]
