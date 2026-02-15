@@ -5,6 +5,8 @@ This script tests the metrics layer as a real user would use it:
 - Imports modules like a developer would
 - Creates collectors and storage
 - Records events and persists to JSONL
+- SQLite store write/query/aggregate workflows
+- JSONL to SQLite migration
 - Validates all public APIs work in production
 
 Run: python tests/smoke/smoke_test_metrics.py
@@ -26,14 +28,22 @@ def test_imports():
     """Test: Can import all public APIs from imp.metrics."""
     try:
         from imp.metrics import (  # noqa: F401
+            CostRollup,
             EventType,
             MetricsCollector,
             MetricsEvent,
+            MetricsFilter,
             MetricsStorage,
+            OperationStats,
+            PerformanceSummary,
+            RollupEntry,
+            SQLiteStore,
+            cost_rollup,
+            performance_summary,
         )
         from imp.metrics.models import EventType as EventTypeModel  # noqa: F401
 
-        print("✓ All imports successful")
+        print("✓ All imports successful (including new exports)")
         return True
     except ImportError as e:
         print(f"✗ Import failed: {e}")
@@ -303,6 +313,156 @@ async def test_end_to_end_workflow():
         return False
 
 
+def test_sqlite_store():
+    """Test: SQLiteStore write, query, and count."""
+    try:
+        from imp.metrics import EventType, MetricsFilter, SQLiteStore
+        from imp.metrics.models import MetricsEvent
+        from imp.providers.base import TokenUsage
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "smoke_test.db"
+
+            with SQLiteStore(db_path) as store:
+                # Write events
+                for i in range(5):
+                    event = MetricsEvent(
+                        event_type=EventType.AGENT_INVOCATION,
+                        agent_role="smoke",
+                        operation=f"test_{i}",
+                        usage=TokenUsage(input_tokens=100 * (i + 1), cost_usd=0.01 * (i + 1)),
+                        model="test-model",
+                        provider="test",
+                        duration_ms=1000 * (i + 1),
+                        ticket_id=f"SMOKE-{i % 2}",
+                    )
+                    store.write_event(event)
+
+                # Query all
+                all_events = store.query()
+                assert len(all_events) == 5
+
+                # Query with filter
+                filtered = store.query(MetricsFilter(ticket_id="SMOKE-0"))
+                assert len(filtered) == 3  # i=0,2,4
+
+                # Count
+                assert store.count() == 5
+                assert store.count(MetricsFilter(ticket_id="SMOKE-1")) == 2  # i=1,3
+
+            print("✓ SQLiteStore write, query, and count successful")
+            return True
+    except Exception as e:
+        print(f"✗ SQLiteStore failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def test_aggregation():
+    """Test: Cost rollup and performance summary."""
+    try:
+        from imp.metrics import EventType, cost_rollup, performance_summary
+        from imp.metrics.models import MetricsEvent
+        from imp.providers.base import TokenUsage
+
+        events = [
+            MetricsEvent(
+                event_type=EventType.AGENT_INVOCATION,
+                agent_role=role,
+                operation=op,
+                usage=TokenUsage(input_tokens=100, output_tokens=50, cost_usd=0.01),
+                model="test",
+                provider="test",
+                duration_ms=ms,
+            )
+            for role, op, ms in [
+                ("review", "analyze", 1000),
+                ("review", "analyze", 2000),
+                ("interview", "ask", 3000),
+            ]
+        ]
+
+        rollup = cost_rollup(events)
+        assert rollup.total_events == 3
+        assert rollup.total_cost_usd == 0.03
+        assert len(rollup.by_agent_role) == 2
+        assert rollup.by_agent_role["review"].event_count == 2
+
+        perf = performance_summary(events)
+        assert perf.total_events == 3
+        assert perf.avg_duration_ms == 2000.0
+        assert len(perf.by_operation) == 2
+
+        print("✓ Aggregation (cost rollup + performance summary) successful")
+        return True
+    except Exception as e:
+        print(f"✗ Aggregation failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def test_migration():
+    """Test: JSONL to SQLite migration."""
+    try:
+        from imp.metrics import EventType, SQLiteStore
+        from imp.metrics.migration import migrate_jsonl_to_sqlite
+        from imp.metrics.models import MetricsEvent
+        from imp.metrics.storage import MetricsStorage
+        from imp.providers.base import TokenUsage
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write to JSONL
+            jsonl_path = Path(tmpdir) / "metrics.jsonl"
+            storage = MetricsStorage(jsonl_path)
+            for i in range(3):
+                event = MetricsEvent(
+                    event_type=EventType.AGENT_INVOCATION,
+                    agent_role="test",
+                    operation=f"op-{i}",
+                    usage=TokenUsage(input_tokens=100, cost_usd=0.01),
+                    model="test",
+                    provider="test",
+                    duration_ms=1000,
+                )
+                storage.write_event(event)
+
+            # Migrate to SQLite
+            db_path = Path(tmpdir) / "metrics.db"
+            with SQLiteStore(db_path) as store:
+                count = migrate_jsonl_to_sqlite(jsonl_path, store)
+                assert count == 3
+                assert store.count() == 3
+
+            print("✓ JSONL to SQLite migration successful")
+            return True
+    except Exception as e:
+        print(f"✗ Migration failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def test_cli_module_imports():
+    """Test: Can import CLI module."""
+    try:
+        from imp.cli.metrics_cli import (  # noqa: F401
+            export_command,
+            metrics_command,
+            migrate_command,
+        )
+
+        print("✓ CLI module imports successful")
+        return True
+    except ImportError as e:
+        print(f"✗ CLI module import failed: {e}")
+        return False
+
+
 async def run_all_tests():
     """Run all smoke tests in sequence."""
     print("=" * 60)
@@ -338,16 +498,28 @@ async def run_all_tests():
     # Test 8: End-to-end workflow
     results.append(await test_end_to_end_workflow())
 
+    # Test 9: SQLiteStore
+    results.append(test_sqlite_store())
+
+    # Test 10: Aggregation
+    results.append(test_aggregation())
+
+    # Test 11: Migration
+    results.append(test_migration())
+
+    # Test 12: CLI imports
+    results.append(test_cli_module_imports())
+
     print()
     print("=" * 60)
 
     if all(results):
-        print("🎉 All smoke tests passed!")
+        print(f"All {len(results)} smoke tests passed!")
         print("=" * 60)
         return 0
     else:
         failed = len([r for r in results if not r])
-        print(f"❌ {failed} smoke test(s) failed")
+        print(f"{failed} smoke test(s) failed")
         print("=" * 60)
         return 1
 

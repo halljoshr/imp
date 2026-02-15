@@ -323,5 +323,111 @@ app.add_typer(metrics_app, name="metrics")
 
 
 @metrics_app.callback(invoke_without_command=True)
-def metrics() -> None:
-    _not_implemented("metrics")
+def metrics(
+    ctx: typer.Context,
+    ticket: Annotated[
+        str | None,
+        typer.Option("--ticket", "-t", help="Filter by ticket ID"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", "-a", help="Filter by agent role"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Filter by model name"),
+    ] = None,
+    session: Annotated[
+        str | None,
+        typer.Option("--session", "-s", help="Filter by session ID"),
+    ] = None,
+    days: Annotated[
+        int,
+        typer.Option("--days", "-d", help="Number of days to show"),
+    ] = 7,
+    date_range: Annotated[
+        str | None,
+        typer.Option("--range", "-r", help="Date range (YYYY-MM-DD:YYYY-MM-DD)"),
+    ] = None,
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """View metrics dashboard."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    from pathlib import Path
+
+    from imp.cli.metrics_cli import metrics_command
+
+    root = Path(project_root) if project_root else Path.cwd()
+    exit_code = metrics_command(
+        ticket=ticket,
+        agent=agent,
+        model=model,
+        session=session,
+        days=days,
+        date_range=date_range,
+        output_format=format.value,
+        project_root=root,
+    )
+    raise typer.Exit(exit_code)
+
+
+@metrics_app.command("export")
+def metrics_export(
+    ticket_id: Annotated[
+        str,
+        typer.Argument(help="Ticket ID to export metrics for"),
+    ],
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Export metrics summary to a PM ticket."""
+    from pathlib import Path
+
+    from imp.cli.metrics_cli import export_command
+
+    root = Path(project_root) if project_root else Path.cwd()
+    exit_code = export_command(
+        ticket_id=ticket_id,
+        output_format=format.value,
+        project_root=root,
+    )
+    raise typer.Exit(exit_code)
+
+
+@metrics_app.command("migrate")
+def metrics_migrate(
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Migrate JSONL metrics to SQLite."""
+    from pathlib import Path
+
+    from imp.cli.metrics_cli import migrate_command
+
+    root = Path(project_root) if project_root else Path.cwd()
+    exit_code = migrate_command(
+        output_format=format.value,
+        project_root=root,
+    )
+    raise typer.Exit(exit_code)

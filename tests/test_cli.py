@@ -61,7 +61,9 @@ def test_review_implemented() -> None:
     assert "review" in result.output.lower()
 
 
-def test_metrics_not_implemented() -> None:
-    result = runner.invoke(app, ["metrics"])
-    assert result.exit_code == 1
-    assert "not implemented" in result.output.lower()
+def test_metrics_implemented() -> None:
+    """Test that imp metrics command is implemented."""
+    result = runner.invoke(app, ["metrics", "--help"])
+    assert result.exit_code == 0
+    assert "not implemented" not in result.output.lower()
+    assert "metrics" in result.output.lower()
