@@ -199,7 +199,17 @@ class ClaudeAgentSDKModel(Model):
 
         # Add message history
         for msg in messages:
-            if hasattr(msg, "role") and hasattr(msg, "content"):
+            parts = getattr(msg, "parts", None)
+            if isinstance(parts, list):
+                # Pydantic AI message types (ModelRequest, ModelResponse)
+                for part in parts:
+                    part_type = type(part).__name__
+                    if part_type in ("UserPromptPart", "TextPart"):
+                        content = getattr(part, "content", "")
+                        if isinstance(content, str):
+                            prompt_parts.append(content)
+            elif hasattr(msg, "role") and hasattr(msg, "content"):
+                # Backward compat for simple message objects
                 prompt_parts.append(f"{msg.role}: {msg.content}")
 
         return "\n\n".join(prompt_parts)
@@ -224,18 +234,34 @@ class ClaudeAgentSDKModel(Model):
             result_message = None
             try:
                 async for chunk in query(prompt=prompt, options=options):
+                    chunk_type = type(chunk).__name__
                     # Check for ResultMessage with structured_output
-                    if type(chunk).__name__ == "ResultMessage":
+                    if chunk_type == "ResultMessage":
                         result_message = chunk
-                    # Extract text content from different chunk types
+                    elif chunk_type in ("SystemMessage", "StreamEvent"):
+                        # Skip non-content message types
+                        continue
                     elif hasattr(chunk, "content"):
-                        # AssistantMessage, SystemMessage, etc.
-                        chunks.append(str(chunk.content))
+                        # AssistantMessage or similar — extract text content
+                        content = chunk.content
+                        if isinstance(content, str):
+                            chunks.append(content)
+                        elif isinstance(content, list):
+                            # Content is a list of blocks (TextBlock, ThinkingBlock, etc.)
+                            for block in content:
+                                block_type = type(block).__name__
+                                if block_type == "TextBlock":
+                                    chunks.append(getattr(block, "text", str(block)))
+                                elif hasattr(block, "text"):
+                                    chunks.append(block.text)
+                                # Skip ThinkingBlock and other non-text blocks
+                        else:
+                            chunks.append(str(content))
                     elif isinstance(chunk, str):
                         chunks.append(chunk)
                     else:
-                        # StreamEvent or other types
-                        chunks.append(str(chunk))
+                        # Unknown type — skip to avoid polluting output
+                        continue
             except Exception as e:
                 return f"Error from claude-agent-sdk: {e}"
 

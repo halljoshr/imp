@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -164,7 +165,6 @@ def test_init_command_exception_human_format(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:
     """Test init_command error handling with human format when scan raises."""
-    from unittest.mock import patch
 
     from imp.context.cli import init_command
 
@@ -178,7 +178,6 @@ def test_init_command_exception_human_format(
 
 def test_init_command_exception_json_format(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """Test init_command error handling with JSON format when scan raises."""
-    from unittest.mock import patch
 
     from imp.context.cli import init_command
 
@@ -190,3 +189,311 @@ def test_init_command_exception_json_format(tmp_path: Path, capsys: pytest.Captu
     data = json.loads(captured.out)
     assert "error" in data
     assert "scan failed" in data["error"]
+
+
+# ===== Summarize Flag Tests =====
+
+
+def test_init_command_summarize_flag(tmp_path: Path) -> None:
+    """Test init_command with --summarize creates summaries."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    # Create a minimal project
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    # Mock the invoke function
+    mock_invoke = AsyncMock(
+        return_value=(
+            "Source code module.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    # Should have called AI for modules
+    assert mock_invoke.call_count > 0
+
+    # Should have saved summaries
+    summaries_path = tmp_path / ".imp" / "summaries.json"
+    assert summaries_path.exists()
+
+    # Summaries should be valid JSON
+    data = json.loads(summaries_path.read_text())
+    assert isinstance(data, dict)
+    assert len(data) > 0
+
+
+def test_init_command_summarize_fills_purpose(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Test init_command with --summarize fills purpose in indexes."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "app.py").write_text("class App: pass")
+
+    mock_invoke = AsyncMock(
+        return_value=(
+            "Application entry point and core logic.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="json",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    # Root .index.md should contain the purpose
+    root_index = (tmp_path / ".index.md").read_text()
+    assert "Application entry point" in root_index
+
+
+def test_init_command_summarize_uses_cache(tmp_path: Path) -> None:
+    """Test init_command with --summarize uses cached summaries."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    mock_invoke = AsyncMock(
+        return_value=(
+            "First run summary.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    # First run — should call AI
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+    first_call_count = mock_invoke.call_count
+
+    # Second run — should use cached summaries (no new AI calls)
+    mock_invoke.reset_mock()
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+    assert mock_invoke.call_count < first_call_count
+
+
+def test_init_command_summarize_without_invoke_fn_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Test init_command with --summarize but no invoke_fn returns error."""
+    from imp.context.cli import init_command
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=None,
+    )
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    assert "provider" in captured.out.lower() or "invoke" in captured.out.lower()
+
+
+def test_init_command_summarize_without_invoke_fn_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Test init_command with --summarize but no invoke_fn returns JSON error."""
+    from imp.context.cli import init_command
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="json",
+        summarize=True,
+        model="test-model",
+        invoke_fn=None,
+    )
+    assert exit_code == 1
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "error" in data
+
+
+# ===== Staleness Detection Tests =====
+
+
+def test_init_command_staleness_detection(tmp_path: Path) -> None:
+    """Test that re-runs detect stale modules (file changes)."""
+    from imp.context.cli import init_command
+
+    # Create initial project
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    # First run — creates cache
+    exit_code = init_command(root=tmp_path, format="human")
+    assert exit_code == 0
+    assert (tmp_path / ".imp" / "scan.json").exists()
+
+    # Second run — should succeed (incremental)
+    exit_code = init_command(root=tmp_path, format="human")
+    assert exit_code == 0
+
+
+def test_init_command_summarize_invalidates_stale_cache(tmp_path: Path) -> None:
+    """Test that --summarize re-summarizes modules whose files changed."""
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    call_count = 0
+
+    async def mock_invoke(prompt: str) -> tuple[str, TokenUsage]:
+        nonlocal call_count
+        call_count += 1
+        return (
+            f"Summary v{call_count}.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+
+    # First run — should call AI
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+    first_call_count = call_count
+
+    # Modify a file to trigger staleness (change content, not just mtime)
+    (src_dir / "main.py").write_text("def hello(): pass\ndef world(): pass\n")
+
+    # Second run — stale module should be re-summarized
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+    # Should have made new AI calls for the stale module
+    assert call_count > first_call_count
+
+
+def test_init_command_jsonl_includes_summary_stats(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Test JSONL output includes summary stats when --summarize is used."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    mock_invoke = AsyncMock(
+        return_value=(
+            "Source module.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="jsonl",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    lines = [json.loads(line) for line in captured.out.strip().split("\n") if line]
+    summary_line = next(entry for entry in lines if entry.get("type") == "summary")
+    assert "summarized_modules" in summary_line
+    assert "summary_tokens" in summary_line
+
+
+def test_init_command_json_includes_summary_stats(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Test JSON output includes summary stats when --summarize is used."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    mock_invoke = AsyncMock(
+        return_value=(
+            "Source module.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    exit_code = init_command(
+        root=tmp_path,
+        format="json",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "summarized_modules" in data
+    assert "summary_tokens" in data

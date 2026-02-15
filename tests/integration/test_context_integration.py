@@ -249,3 +249,148 @@ def broken(
                     "SyntaxError" in mod_info.parse_error
                     or "IndentationError" in mod_info.parse_error
                 )
+
+
+# ===== L3 Integration Tests =====
+
+
+def test_full_pipeline_with_summarization(tmp_path: Path) -> None:
+    """Test full L1+L2+L3 pipeline with mock AI summarization."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.types import TokenUsage
+
+    # Create a multi-module project
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "core.py").write_text("""
+def process() -> None:
+    \"\"\"Process data.\"\"\"
+    pass
+
+class Processor:
+    \"\"\"Main processor.\"\"\"
+    def run(self) -> None:
+        pass
+""")
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_core.py").write_text("""
+def test_process() -> None:
+    assert True
+""")
+
+    mock_invoke = AsyncMock(
+        side_effect=lambda prompt: (
+            f"Module at {prompt.split('`')[1]} handles core logic.",
+            TokenUsage(input_tokens=100, output_tokens=20, total_tokens=120),
+        )
+    )
+
+    # Run with summarization
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    # Verify .index.md has purpose descriptions
+    root_index = (tmp_path / ".index.md").read_text()
+    assert "handles core logic" in root_index
+
+    # Verify summaries cache exists
+    summaries_path = tmp_path / ".imp" / "summaries.json"
+    assert summaries_path.exists()
+    summaries = json.loads(summaries_path.read_text())
+    assert len(summaries) >= 2  # src/ and tests/
+
+
+def test_staleness_detection_across_reruns(tmp_path: Path) -> None:
+    """Test that staleness detection works across re-runs."""
+    from imp.context.cli import init_command
+    from imp.context.staleness import detect_stale_modules, load_previous_scan
+
+    # Create initial project
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "main.py").write_text("def hello(): pass")
+
+    # First run
+    exit_code = init_command(root=tmp_path, format="human")
+    assert exit_code == 0
+
+    # Load the cached scan
+    previous = load_previous_scan(tmp_path)
+    assert previous is not None
+
+    # Add a new file
+    (src_dir / "utils.py").write_text("def helper(): pass")
+
+    # Re-scan
+    from imp.context.parser import scan_and_parse
+
+    current = scan_and_parse(tmp_path)
+
+    # Detect staleness
+    stale = detect_stale_modules(current, previous)
+    assert len(stale) > 0
+
+    # Should detect the src module as stale (files_added)
+    src_stale = [s for s in stale if "src" in s.module_path]
+    assert len(src_stale) == 1
+    assert src_stale[0].reason == "files_added"
+
+
+def test_summary_cache_persistence_across_reruns(tmp_path: Path) -> None:
+    """Test that cached summaries persist and are reused across re-runs."""
+    from unittest.mock import AsyncMock
+
+    from imp.context.cli import init_command
+    from imp.context.summary_cache import load_summaries
+    from imp.types import TokenUsage
+
+    # Create project
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "app.py").write_text("class App: pass")
+
+    mock_invoke = AsyncMock(
+        return_value=(
+            "Application module.",
+            TokenUsage(input_tokens=50, output_tokens=10, total_tokens=60),
+        )
+    )
+
+    # First run with summarization
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+    first_call_count = mock_invoke.call_count
+
+    # Load cached summaries
+    cached = load_summaries(tmp_path)
+    assert len(cached) > 0
+
+    # Second run — should reuse cache
+    mock_invoke.reset_mock()
+    exit_code = init_command(
+        root=tmp_path,
+        format="human",
+        summarize=True,
+        model="test-model",
+        invoke_fn=mock_invoke,
+    )
+    assert exit_code == 0
+
+    # Should have fewer AI calls (all cached)
+    assert mock_invoke.call_count < first_call_count

@@ -1,12 +1,17 @@
 """Imp CLI application."""
 
+from __future__ import annotations
+
 from enum import StrEnum
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich import print as rprint
 
 import imp as imp_pkg
+
+if TYPE_CHECKING:
+    from imp.context.summarizer import InvokeFn
 
 
 class OutputFormat(StrEnum):
@@ -62,6 +67,14 @@ def init(
         OutputFormat,
         typer.Option("--format", "-f", help="Output format"),
     ] = OutputFormat.human,
+    summarize: Annotated[
+        bool,
+        typer.Option("--summarize", help="Run AI summarization (L3) on modules"),
+    ] = False,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="AI model for summarization"),
+    ] = None,
 ) -> None:
     """Initialize project indexes for context-efficient navigation."""
     from pathlib import Path
@@ -69,8 +82,49 @@ def init(
     from imp.context.cli import init_command
 
     root = Path(project_root) if project_root else Path.cwd()
-    exit_code = init_command(root=root, format=format.value)
+
+    # Build invoke_fn from model if summarize is requested
+    invoke_fn = None
+    if summarize and model:
+        invoke_fn = _build_invoke_fn(model)
+
+    exit_code = init_command(
+        root=root,
+        format=format.value,
+        summarize=summarize,
+        model=model,
+        invoke_fn=invoke_fn,
+    )
     raise typer.Exit(exit_code)
+
+
+def _build_invoke_fn(model: str) -> InvokeFn:
+    """Build an InvokeFn from model string using PydanticAIProvider.
+
+    Args:
+        model: Model string (e.g., "anthropic:claude-haiku-4-5")
+
+    Returns:
+        Async callable: prompt -> (purpose_string, TokenUsage)
+    """
+    from typing import cast
+
+    from pydantic_ai.models import KnownModelName
+
+    from imp.providers.pydantic_ai import PydanticAIProvider
+    from imp.types import TokenUsage
+
+    provider: PydanticAIProvider[str, None] = PydanticAIProvider(
+        model=cast(KnownModelName, model),
+        output_type=str,
+        system_prompt="You are a concise code summarizer. Respond with 2-3 sentences only.",
+    )
+
+    async def invoke_fn(prompt: str) -> tuple[str, TokenUsage]:
+        result = await provider.invoke(prompt)
+        return result.output, result.usage
+
+    return invoke_fn
 
 
 check_app = typer.Typer(help="Run validation checks.")

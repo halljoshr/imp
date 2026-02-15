@@ -244,15 +244,15 @@ class TestClaudeAgentSDKModel:
             assert result == "chunk1chunk2"
 
     @pytest.mark.asyncio
-    async def test_call_sdk_isolated_handles_other_types(self) -> None:
-        """SDK call isolation handles other chunk types via str()."""
+    async def test_call_sdk_isolated_skips_unknown_types(self) -> None:
+        """SDK call isolation skips unknown chunk types (not strings, not messages)."""
         model = ClaudeAgentSDKModel()
 
         with patch("imp.providers.claude_sdk_model.query") as mock_query:
 
             async def mock_iterator():
                 class CustomChunk:
-                    def __str__(self):
+                    def __str__(self) -> str:
                         return "custom"
 
                 yield CustomChunk()
@@ -260,7 +260,76 @@ class TestClaudeAgentSDKModel:
             mock_query.return_value = mock_iterator()
 
             result = await model._call_sdk_isolated("test prompt", None)
-            assert result == "custom"
+            assert result == ""  # Unknown types are skipped
+
+    @pytest.mark.asyncio
+    async def test_call_sdk_isolated_skips_system_messages(self) -> None:
+        """SDK call isolation skips SystemMessage chunks."""
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class SystemMessage:
+                    content = "System init data"
+
+                class MockMessage:
+                    content = "Real response"
+
+                yield SystemMessage()
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            result = await model._call_sdk_isolated("test prompt", None)
+            assert result == "Real response"
+
+    @pytest.mark.asyncio
+    async def test_call_sdk_isolated_handles_list_content_blocks(self) -> None:
+        """SDK call isolation extracts text from content block lists."""
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class TextBlock:
+                    text = "Hello from text block"
+
+                class ThinkingBlock:
+                    thinking = "internal thinking"
+
+                # OtherTextBlock has .text but isn't named TextBlock
+                class OtherTextBlock:
+                    text = " and more text"
+
+                class MockMessage:
+                    def __init__(self) -> None:
+                        self.content = [TextBlock(), ThinkingBlock(), OtherTextBlock()]
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            result = await model._call_sdk_isolated("test prompt", None)
+            assert result == "Hello from text block and more text"
+
+    @pytest.mark.asyncio
+    async def test_call_sdk_isolated_handles_non_str_non_list_content(self) -> None:
+        """SDK call isolation handles content that is neither str nor list."""
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = 42  # Not str, not list
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            result = await model._call_sdk_isolated("test prompt", None)
+            assert result == "42"
 
     @pytest.mark.asyncio
     async def test_call_sdk_isolated_handles_exception(self) -> None:
@@ -629,3 +698,103 @@ class TestClaudeAgentSDKModelWithSystemPrompt:
                 # Prompt is always passed as kwarg
                 prompt = call_args.kwargs.get("prompt", "")
                 assert "System:" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_request_builds_prompt_from_pydantic_ai_messages(self) -> None:
+        """Request extracts user content from Pydantic AI ModelRequest parts."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = "Response"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Create a real Pydantic AI ModelRequest with UserPromptPart
+            user_msg = ModelRequest(parts=[UserPromptPart(content="Summarize this module")])
+
+            with patch.object(model, "_get_instructions", return_value="Be concise"):
+                await model.request(
+                    messages=[user_msg],
+                    model_settings=None,
+                    model_request_parameters=ModelRequestParameters(),
+                )
+
+                call_args = mock_query.call_args
+                assert call_args is not None
+                prompt = call_args.kwargs.get("prompt", "")
+                assert "Be concise" in prompt
+                assert "Summarize this module" in prompt
+
+    @pytest.mark.asyncio
+    async def test_request_skips_non_string_part_content(self) -> None:
+        """Request skips parts with non-string content (e.g., multimodal)."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = "Response"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            # Create a UserPromptPart with list content (multimodal)
+            multimodal_part = UserPromptPart(content=["image data", "text"])  # type: ignore[arg-type]
+            user_msg = ModelRequest(parts=[multimodal_part])
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                await model.request(
+                    messages=[user_msg],
+                    model_settings=None,
+                    model_request_parameters=ModelRequestParameters(),
+                )
+
+                call_args = mock_query.call_args
+                assert call_args is not None
+                prompt = call_args.kwargs.get("prompt", "")
+                # Non-string content should be skipped
+                assert prompt == ""
+
+    @pytest.mark.asyncio
+    async def test_request_skips_messages_without_parts_or_role(self) -> None:
+        """Request skips messages that have neither parts list nor role/content."""
+        model = ClaudeAgentSDKModel()
+
+        with patch("imp.providers.claude_sdk_model.query") as mock_query:
+
+            async def mock_iterator():
+                class MockMessage:
+                    content = "Response"
+
+                yield MockMessage()
+
+            mock_query.return_value = mock_iterator()
+
+            class OpaqueMessage:
+                """Message with no parts, no role, no content."""
+
+                data = "something"
+
+            with patch.object(model, "_get_instructions", return_value=None):
+                await model.request(
+                    messages=[OpaqueMessage()],  # type: ignore[list-item]
+                    model_settings=None,
+                    model_request_parameters=ModelRequestParameters(),
+                )
+
+                call_args = mock_query.call_args
+                assert call_args is not None
+                prompt = call_args.kwargs.get("prompt", "")
+                # Opaque message should be skipped
+                assert prompt == ""

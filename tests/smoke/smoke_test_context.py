@@ -368,6 +368,103 @@ def test_real_project() -> bool:
         return False
 
 
+def test_l3_imports() -> bool:
+    """Test L3 module imports (summarizer, staleness, summary cache)."""
+    print("\nTesting L3 imports...")
+
+    try:
+        from imp.context.staleness import (  # noqa: F401
+            StaleModule,
+            detect_stale_modules,
+            load_previous_scan,
+        )
+        from imp.context.summarizer import (  # noqa: F401
+            InvokeFn,
+            build_prompt,
+            summarize_module,
+            summarize_project,
+        )
+        from imp.context.summary_cache import (  # noqa: F401
+            SummaryEntry,
+            load_summaries,
+            save_summaries,
+        )
+
+        print("✓ All L3 modules imported successfully")
+        return True
+    except ImportError as e:
+        print(f"✗ L3 import error: {e}")
+        return False
+
+
+def test_l3_models() -> bool:
+    """Test L3 model construction and serialization."""
+    print("\nTesting L3 models...")
+
+    try:
+        from datetime import UTC, datetime
+
+        from imp.context.staleness import StaleModule
+        from imp.context.summary_cache import SummaryEntry
+
+        # Test SummaryEntry
+        entry = SummaryEntry(
+            purpose="Handles authentication.",
+            summarized_at=datetime.now(UTC),
+            model_used="test-model",
+        )
+        assert entry.purpose == "Handles authentication."
+        json_data = entry.model_dump()
+        assert json_data["purpose"] == "Handles authentication."
+
+        # Test StaleModule
+        stale = StaleModule(
+            module_path="src/",
+            reason="files_modified",
+            changed_files=["src/main.py"],
+        )
+        assert stale.module_path == "src/"
+        assert stale.reason == "files_modified"
+
+        print("✓ L3 models work correctly")
+        return True
+    except Exception as e:
+        print(f"✗ L3 model test failed: {e}")
+        return False
+
+
+def test_summary_cache_round_trip() -> bool:
+    """Test summary cache save/load round-trip."""
+    print("\nTesting summary cache round-trip...")
+
+    try:
+        from datetime import UTC, datetime
+
+        from imp.context.summary_cache import SummaryEntry, load_summaries, save_summaries
+
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            summaries = {
+                "src/": SummaryEntry(
+                    purpose="Source code.",
+                    summarized_at=datetime.now(UTC),
+                    model_used="test-model",
+                ),
+            }
+            save_summaries(summaries, tmp_path)
+            loaded = load_summaries(tmp_path)
+
+            assert len(loaded) == 1
+            assert loaded["src/"].purpose == "Source code."
+
+        print("✓ Summary cache round-trip works")
+        return True
+    except Exception as e:
+        print(f"✗ Summary cache test failed: {e}")
+        return False
+
+
 def main() -> int:
     """Run all smoke tests."""
     print("=" * 60)
@@ -382,6 +479,9 @@ def main() -> int:
         test_indexer,
         test_cli,
         test_real_project,
+        test_l3_imports,
+        test_l3_models,
+        test_summary_cache_round_trip,
     ]
 
     results = []
