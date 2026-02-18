@@ -23,3 +23,4 @@ htmlcov/
 
 # Imp
 .imp-metrics/
+.trees/

@@ -332,6 +332,124 @@ def plan(
     raise typer.Exit(exit_code)
 
 
+code_app = typer.Typer(help="Managed code execution sessions.")
+app.add_typer(code_app, name="code")
+
+
+@code_app.callback(invoke_without_command=True)
+def code(ctx: typer.Context) -> None:
+    """Managed code execution: start, done, list, clean sessions."""
+    if ctx.invoked_subcommand is None:
+        rprint(
+            "Use [bold]imp code start[/bold], [bold]done[/bold],"
+            " [bold]list[/bold], or [bold]clean[/bold]."
+        )
+        rprint("Run [bold]imp code --help[/bold] for details.")
+        raise typer.Exit(0)
+
+
+@code_app.command("start")
+def code_start(
+    ticket_id: Annotated[
+        str,
+        typer.Argument(help="Ticket ID (e.g. IMP-5)"),
+    ],
+    title: Annotated[
+        str,
+        typer.Argument(help="Ticket title"),
+    ],
+    description: Annotated[
+        str,
+        typer.Option("--description", "-d", help="Ticket description"),
+    ] = "",
+    base_branch: Annotated[
+        str,
+        typer.Option("--base-branch", "-b", help="Base branch for the worktree"),
+    ] = "main",
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Start a new managed executor session for a ticket."""
+    from pathlib import Path
+
+    from imp.executor.cli import start_command
+
+    root = Path(project_root) if project_root else None
+    exit_code = start_command(
+        ticket_id=ticket_id,
+        title=title,
+        description=description,
+        base_branch=base_branch,
+        project_root=root,
+    )
+    raise typer.Exit(exit_code)
+
+
+@code_app.command("done")
+def code_done(
+    ticket_id: Annotated[
+        str,
+        typer.Argument(help="Ticket ID to complete"),
+    ],
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Run the completion pipeline for a ticket session."""
+    from pathlib import Path
+
+    from imp.executor.cli import done_command
+
+    root = Path(project_root) if project_root else None
+    exit_code = done_command(ticket_id=ticket_id, project_root=root)
+    raise typer.Exit(exit_code)
+
+
+@code_app.command("list")
+def code_list(
+    format: Annotated[
+        OutputFormat,
+        typer.Option("--format", "-f", help="Output format"),
+    ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """List all executor sessions."""
+    from pathlib import Path
+
+    from imp.executor.cli import list_command
+
+    root = Path(project_root) if project_root else None
+    exit_code = list_command(project_root=root, format=format.value)
+    raise typer.Exit(exit_code)
+
+
+@code_app.command("clean")
+def code_clean(
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Also remove active sessions"),
+    ] = False,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
+) -> None:
+    """Remove completed and escalated session worktrees."""
+    from pathlib import Path
+
+    from imp.executor.cli import clean_command
+
+    root = Path(project_root) if project_root else None
+    exit_code = clean_command(force=force, project_root=root)
+    raise typer.Exit(exit_code)
+
+
 metrics_app = typer.Typer(help="View and manage metrics.")
 app.add_typer(metrics_app, name="metrics")
 

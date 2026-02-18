@@ -91,7 +91,6 @@ omit = [
     "src/imp/interview/skills/*",
     "src/imp/pm/cli.py",
     "src/imp/review/*",
-    "src/imp/executor/*",
 ]
 
 [tool.importlinter]

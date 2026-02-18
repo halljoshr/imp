@@ -22,7 +22,7 @@ def test_help() -> None:
 def test_subcommands_listed_in_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("init", "check", "interview", "review", "metrics"):
+    for cmd in ("init", "check", "interview", "review", "metrics", "code"):
         assert cmd in result.output
 
 
