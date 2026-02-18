@@ -65,6 +65,7 @@ def test_plan_command_with_parent_success(
         create_parent=True,
         default_priority="medium",
         format="json",
+        project_root=tmp_path,
     )
 
     # Verify
@@ -103,6 +104,7 @@ def test_plan_command_without_parent_success(
         create_parent=False,
         default_priority="medium",
         format="json",
+        project_root=tmp_path,
     )
 
     # Verify
@@ -143,6 +145,7 @@ def test_plan_command_sets_parent_id_on_child_tickets(
         create_parent=True,
         default_priority="medium",
         format="json",
+        project_root=tmp_path,
     )
 
     # Verify exit code
@@ -340,6 +343,7 @@ def test_plan_command_json_output_valid(
         create_parent=True,
         default_priority="medium",
         format="json",
+        project_root=tmp_path,
     )
 
     assert exit_code == 0
@@ -384,6 +388,7 @@ def test_plan_command_human_output_runs_without_error(
         create_parent=False,
         default_priority="medium",
         format="human",
+        project_root=tmp_path,
     )
 
     assert exit_code == 0
@@ -422,6 +427,7 @@ def test_plan_command_custom_priority_propagates(
         create_parent=True,
         default_priority="urgent",
         format="json",
+        project_root=tmp_path,
     )
 
     assert exit_code == 0
@@ -429,3 +435,150 @@ def test_plan_command_custom_priority_propagates(
     # Verify priority on created ticket
     first_call_spec = mock_adapter.create_ticket.call_args_list[0][0][0]
     assert first_call_spec.priority == TicketPriority.URGENT
+
+
+# --- Idempotency Tests ---
+
+
+@patch("imp.pm.cli.PlaneAdapter")
+@patch("imp.pm.cli.PlaneConfig.from_env")
+def test_plan_command_writes_receipt(
+    mock_from_env: MagicMock,
+    mock_adapter_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Test plan_command writes a receipt file after successful creation."""
+    from imp.pm.cli import plan_command
+
+    mock_adapter = MagicMock()
+    mock_adapter.create_ticket.side_effect = [
+        TicketRef(ticket_id="t-1", ticket_number="IMP-1", url="http://localhost/t-1"),
+        TicketRef(ticket_id="t-2", ticket_number="IMP-2", url="http://localhost/t-2"),
+        TicketRef(ticket_id="t-3", ticket_number="IMP-3", url="http://localhost/t-3"),
+    ]
+    mock_adapter_cls.return_value = mock_adapter
+    mock_from_env.return_value = PlaneConfig(
+        api_key="test-key", workspace_slug="ws", project_id="proj"
+    )
+
+    spec_file = _write_spec(tmp_path, MINIMAL_SPEC)
+
+    exit_code = plan_command(
+        spec_file=spec_file,
+        provider="plane",
+        create_parent=True,
+        default_priority="medium",
+        format="json",
+        project_root=tmp_path,
+    )
+
+    assert exit_code == 0
+
+    # Verify receipt was written
+    receipt_dir = tmp_path / ".imp" / "plans"
+    assert receipt_dir.exists()
+    receipts = list(receipt_dir.glob("*.json"))
+    assert len(receipts) == 1
+
+    # Verify receipt contains plan result
+    receipt_data = json.loads(receipts[0].read_text())
+    assert receipt_data["spec_name"] == "Test Project"
+    assert receipt_data["total_tickets"] == 3
+
+
+@patch("imp.pm.cli.PlaneAdapter")
+@patch("imp.pm.cli.PlaneConfig.from_env")
+def test_plan_command_blocks_duplicate(
+    mock_from_env: MagicMock,
+    mock_adapter_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Test plan_command exits 1 when spec was already planned."""
+    from imp.pm.cli import plan_command
+
+    mock_adapter = MagicMock()
+    mock_adapter.create_ticket.side_effect = [
+        TicketRef(ticket_id="t-1", ticket_number="IMP-1", url="http://localhost/t-1"),
+        TicketRef(ticket_id="t-2", ticket_number="IMP-2", url="http://localhost/t-2"),
+        TicketRef(ticket_id="t-3", ticket_number="IMP-3", url="http://localhost/t-3"),
+    ]
+    mock_adapter_cls.return_value = mock_adapter
+    mock_from_env.return_value = PlaneConfig(
+        api_key="test-key", workspace_slug="ws", project_id="proj"
+    )
+
+    spec_file = _write_spec(tmp_path, MINIMAL_SPEC)
+
+    # First run succeeds
+    exit_code = plan_command(
+        spec_file=spec_file,
+        provider="plane",
+        create_parent=True,
+        default_priority="medium",
+        format="json",
+        project_root=tmp_path,
+    )
+    assert exit_code == 0
+
+    # Second run blocked
+    exit_code = plan_command(
+        spec_file=spec_file,
+        provider="plane",
+        create_parent=True,
+        default_priority="medium",
+        format="json",
+        project_root=tmp_path,
+    )
+    assert exit_code == 1
+    assert mock_adapter.create_ticket.call_count == 3  # Only from first run
+
+
+@patch("imp.pm.cli.PlaneAdapter")
+@patch("imp.pm.cli.PlaneConfig.from_env")
+def test_plan_command_force_overrides_duplicate_check(
+    mock_from_env: MagicMock,
+    mock_adapter_cls: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Test plan_command with force=True bypasses duplicate check."""
+    from imp.pm.cli import plan_command
+
+    mock_adapter = MagicMock()
+    mock_adapter.create_ticket.side_effect = [
+        TicketRef(ticket_id="t-1", ticket_number="IMP-1", url="http://localhost/t-1"),
+        TicketRef(ticket_id="t-2", ticket_number="IMP-2", url="http://localhost/t-2"),
+        TicketRef(ticket_id="t-3", ticket_number="IMP-3", url="http://localhost/t-3"),
+        TicketRef(ticket_id="t-4", ticket_number="IMP-4", url="http://localhost/t-4"),
+        TicketRef(ticket_id="t-5", ticket_number="IMP-5", url="http://localhost/t-5"),
+        TicketRef(ticket_id="t-6", ticket_number="IMP-6", url="http://localhost/t-6"),
+    ]
+    mock_adapter_cls.return_value = mock_adapter
+    mock_from_env.return_value = PlaneConfig(
+        api_key="test-key", workspace_slug="ws", project_id="proj"
+    )
+
+    spec_file = _write_spec(tmp_path, MINIMAL_SPEC)
+
+    # First run
+    exit_code = plan_command(
+        spec_file=spec_file,
+        provider="plane",
+        create_parent=True,
+        default_priority="medium",
+        format="json",
+        project_root=tmp_path,
+    )
+    assert exit_code == 0
+
+    # Second run with force
+    exit_code = plan_command(
+        spec_file=spec_file,
+        provider="plane",
+        create_parent=True,
+        default_priority="medium",
+        format="json",
+        project_root=tmp_path,
+        force=True,
+    )
+    assert exit_code == 0
+    assert mock_adapter.create_ticket.call_count == 6  # Both runs created tickets

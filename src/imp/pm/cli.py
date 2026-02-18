@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,12 +17,26 @@ from imp.pm.models import PlaneConfig, PlanResult, TicketPriority, TicketRef
 from imp.pm.plane import PlaneAdapter
 
 
+def _receipt_path(project_root: Path, spec_content: str) -> Path:
+    """Get the receipt file path for a spec based on content hash."""
+    spec_hash = hashlib.sha256(spec_content.encode()).hexdigest()[:12]
+    return project_root / ".imp" / "plans" / f"{spec_hash}.json"
+
+
+def _write_receipt(receipt_file: Path, result: PlanResult) -> None:
+    """Write a plan receipt after successful ticket creation."""
+    receipt_file.parent.mkdir(parents=True, exist_ok=True)
+    receipt_file.write_text(result.model_dump_json(indent=2))
+
+
 def plan_command(
     spec_file: Path,
     provider: str = "plane",
     create_parent: bool = True,
     default_priority: str = "medium",
     format: str = "human",
+    project_root: Path | None = None,
+    force: bool = False,
 ) -> int:
     """Generate PM tickets from an interview spec file.
 
@@ -31,17 +46,22 @@ def plan_command(
         create_parent: If True, create parent epic ticket.
         default_priority: Default ticket priority.
         format: Output format (human, json, jsonl).
+        project_root: Project root for .imp/ directory (default: cwd).
+        force: If True, bypass duplicate check.
 
     Returns:
         Exit code (0 for success, 1 for error).
     """
+    root = project_root or Path.cwd()
+
     # 1. Load and validate spec file
     if not spec_file.exists():
         rprint(f"[red]Error:[/red] File not found: {spec_file}")
         return 1
 
     try:
-        spec_json = json.loads(spec_file.read_text())
+        spec_content = spec_file.read_text()
+        spec_json = json.loads(spec_content)
     except json.JSONDecodeError as e:
         rprint(f"[red]Error:[/red] Invalid JSON: {e}")
         return 1
@@ -50,6 +70,19 @@ def plan_command(
         spec = InterviewSpec.model_validate(spec_json)
     except ValidationError as e:
         rprint(f"[red]Error:[/red] Invalid spec: {e}")
+        return 1
+
+    # 1b. Check for existing plan receipt
+    receipt_file = _receipt_path(root, spec_content)
+    if not force and receipt_file.exists():
+        existing = json.loads(receipt_file.read_text())
+        rprint(
+            f"[red]Error:[/red] Spec already planned — "
+            f"{existing['total_tickets']} tickets created for "
+            f"[bold]{existing['spec_name']}[/bold]"
+        )
+        rprint(f"\nReceipt: {receipt_file}")
+        rprint("Use [bold]--force[/bold] to create tickets again.")
         return 1
 
     # 2. Map priority string to enum
@@ -121,7 +154,10 @@ def plan_command(
         total_tickets=len(ticket_refs),
     )
 
-    # 7. Output in requested format
+    # 7. Write plan receipt
+    _write_receipt(receipt_file, result)
+
+    # 8. Output in requested format
     if format == "json":
         print(result.model_dump_json(indent=2))
     elif format == "jsonl":

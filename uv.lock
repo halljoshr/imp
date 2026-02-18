@@ -1261,6 +1261,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai" },
+    { name = "python-dotenv" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -1293,6 +1294,7 @@ requires-dist = [
     { name = "plane-sdk", marker = "extra == 'plane'", specifier = ">=0.2.6" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai", specifier = ">=1.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "tree-sitter", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },
     { name = "tree-sitter-typescript", marker = "extra == 'tree-sitter'", specifier = ">=0.23" },

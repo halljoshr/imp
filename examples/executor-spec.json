@@ -1,0 +1,229 @@
+{
+  "name": "Imp v0.1 — Managed Executor",
+  "problem_statement": "When coding agents start work without clear inputs, outputs, and project conventions, they waste context on discovery instead of building. The coding is fast when you know what you're supposed to be doing — but without a structured handoff of requirements, data locations, and quality rules, agents go off-rails, refactor outside scope, or produce code that doesn't follow project patterns. The executor ensures agents have everything they need upfront so they can one-shot small features with tight context.",
+  "system_overview": "Managed Executor module that wraps coding agent sessions with git worktree isolation, structured context injection (TASK.md), validation pipelines, and decision logging. Each session works on one small ticket, validates itself, commits, updates PM, and writes a handoff — then the loop restarts. The user launches their own agent; Imp owns the workspace setup, rules injection, and completion workflow.",
+  "components": [
+    {
+      "name": "Worktree Manager",
+      "purpose": "Creates and manages git worktrees so each coding agent session gets an isolated copy of the repo, preventing agents from overwriting each other's work.",
+      "inputs": [
+        "Ticket ID (e.g., IMP-042)",
+        "Repository root path",
+        "Base branch to create worktree from (default: main)"
+      ],
+      "outputs": [
+        "Worktree directory at .trees/{ticket-id}/",
+        "Git branch imp/{ticket-id} tracking the worktree",
+        "List of active worktrees with status"
+      ],
+      "constraints": [
+        "Must use subprocess (no pygit2, no GitPython)",
+        "Branch name convention: imp/{ticket-id}",
+        "Worktree path convention: .trees/{ticket-id}/",
+        ".trees/ must be in .gitignore"
+      ],
+      "edge_cases": [
+        "Worktree already exists for same ticket ID",
+        "Branch already exists but worktree was deleted",
+        "Base branch has uncommitted changes",
+        "Disk full during worktree creation",
+        "Orphaned worktrees from crashed sessions"
+      ],
+      "success_criteria": [
+        "Agents working on different tickets cannot overwrite each other's files",
+        "Worktree creation is idempotent — re-running for same ticket is safe",
+        "imp code list shows all active worktrees with their ticket IDs",
+        "imp code clean removes all worktrees and prunes branches"
+      ]
+    },
+    {
+      "name": "Context Generator (TASK.md)",
+      "purpose": "Assembles all context a coding agent needs into a single TASK.md file placed in the worktree root, so the agent can be productive immediately without hunting for information.",
+      "inputs": [
+        "Ticket details (title, description, acceptance criteria) from PM tool or spec",
+        "Project structure from .index.md files",
+        "Available skills and references from project conventions",
+        "Quality rules (TDD, linting, type checking requirements)",
+        "Context budget thresholds"
+      ],
+      "outputs": [
+        "TASK.md file in worktree root containing: goal, project structure, available skills, data locations, expected output format, quality rules, scope constraints"
+      ],
+      "constraints": [
+        "TASK.md should be concise — agent context is precious",
+        "Must include 'do not refactor outside ticket scope' rule",
+        "Must reference .index.md for codebase navigation, not dump full code",
+        "Must include TDD requirement (tests first)"
+      ],
+      "edge_cases": [
+        "Ticket has no description or minimal spec",
+        "No .index.md files exist (project not initialized with imp init)",
+        "Referenced skills or references don't exist",
+        "Spec references data sources that are unavailable"
+      ],
+      "success_criteria": [
+        "Agent can start productive work by reading only TASK.md",
+        "TASK.md contains the five essentials: project structure, skills, goal, data location, expected output",
+        "No full codebase dump — uses .index.md references for navigation"
+      ]
+    },
+    {
+      "name": "Completion Pipeline",
+      "purpose": "Runs the full validation and closeout sequence when an agent signals it is done: validate, review, health check, commit, update PM, and write handoff.",
+      "inputs": [
+        "Worktree path with agent's completed work",
+        "Ticket ID for PM updates",
+        "Model configuration for imp review"
+      ],
+      "outputs": [
+        "Validation result from imp check (test, lint, type, format gates)",
+        "Review result from imp review",
+        "Git commit on the worktree branch",
+        "PM ticket updated with status and metrics",
+        "Handoff log with decisions made and rationale"
+      ],
+      "constraints": [
+        "imp check and imp review run as subprocess (L4 layer independence)",
+        "Circuit breaker: 3 validation attempts, then escalate to human",
+        "Agent should self-validate before triggering completion pipeline to save cycles",
+        "Commit only after all validation gates pass"
+      ],
+      "edge_cases": [
+        "Tests fail after 3 retry attempts — escalation flow",
+        "imp review finds critical issues — re-enter fix loop",
+        "Agent modified files outside ticket scope",
+        "Merge conflicts when merging worktree branch back",
+        "PM tool unreachable during status update",
+        "Agent built something that doesn't exist in the spec"
+      ],
+      "success_criteria": [
+        "No code is committed unless all validation gates pass",
+        "Failed validation escalates to human after 3 attempts with clear error context",
+        "PM ticket reflects actual session outcome (completed, escalated, checkpointed)",
+        "Decision log is written before worktree can be cleaned"
+      ]
+    },
+    {
+      "name": "Decision Logger",
+      "purpose": "Captures the decisions a coding agent made during a session and why, creating a reusable reference for future agents and human review.",
+      "inputs": [
+        "Agent session activity (files created, modified, decisions made)",
+        "Ticket context (what was being built)",
+        "Validation results and any retry history"
+      ],
+      "outputs": [
+        "Decision log with what was decided, why, and alternatives considered",
+        "Handoff state for next agent: files modified, remaining work, blockers, key gotchas",
+        "Metrics: tokens used, cost, duration, attempts"
+      ],
+      "constraints": [
+        "Log must persist after worktree cleanup — stored outside .trees/",
+        "Must capture enough context that a new agent can pick up without re-reading everything",
+        "Should be structured data (JSON), not freeform text"
+      ],
+      "edge_cases": [
+        "Agent crashed before writing log — partial recovery",
+        "Multiple sessions on same ticket — append vs overwrite",
+        "Log grows too large over many sessions"
+      ],
+      "success_criteria": [
+        "Decision log can be used to create project conventions and references for future work",
+        "Next agent on same codebase can read the log and understand what was done and why",
+        "Metrics from log feed into imp metrics for cost tracking"
+      ]
+    },
+    {
+      "name": "Session CLI",
+      "purpose": "Command-line interface for managing executor sessions: starting work, completing work, listing active sessions, and cleaning up.",
+      "inputs": [
+        "imp code start {ticket-id} — ticket ID and optional description",
+        "imp code done {ticket-id} — signals completion, triggers pipeline",
+        "imp code list — no arguments",
+        "imp code clean — no arguments, optional --force flag"
+      ],
+      "outputs": [
+        "start: Worktree created, TASK.md generated, ready-to-work message",
+        "done: Completion pipeline results (validation, review, commit, PM update)",
+        "list: Table of active sessions with ticket ID, branch, status, age",
+        "clean: Cleanup summary showing removed worktrees"
+      ],
+      "constraints": [
+        "Must support --format json/jsonl/human output (consistent with all imp commands)",
+        "Must run from the main repo root, not from inside a worktree",
+        "Typer sub-group pattern (imp code {subcommand})"
+      ],
+      "edge_cases": [
+        "Running imp code start when already inside a worktree",
+        "Running imp code done on a ticket that has failing tests",
+        "Running imp code clean while an agent is still working",
+        "No active sessions when running list or clean"
+      ],
+      "success_criteria": [
+        "imp code start creates worktree + TASK.md in under 5 seconds",
+        "imp code done runs full pipeline and provides clear pass/fail summary",
+        "imp code list shows all sessions at a glance",
+        "imp code clean is safe — warns before deleting, respects active sessions"
+      ]
+    }
+  ],
+  "success_criteria": [
+    "Agent understands what to build from TASK.md alone — no hunting for requirements",
+    "Agent builds with TDD and follows project conventions and references",
+    "Agent stays on scope — works only on its assigned ticket",
+    "Validation catches issues before code is committed",
+    "Circuit breaker escalates to human after 3 failed attempts",
+    "Small features ship fast — tight context, one ticket per session",
+    "Decision log creates reusable knowledge for future agents and humans",
+    "Full workflow: start → build → validate → review → commit → update PM → handoff"
+  ],
+  "out_of_scope": [
+    "Automated agent launching (ClaudeCodeExecutor) — user launches their own agent",
+    "Multi-agent coordination within a single session",
+    "Real-time token monitoring during agent execution",
+    "Automatic merge of worktree branches back to main",
+    "PR creation (agent or user handles this separately)"
+  ],
+  "constraints": [
+    "Manual executor only — user launches their own coding agent in the worktree",
+    "Git worktrees via subprocess only (no pygit2, no GitPython)",
+    "imp check and imp review called as subprocess for L4 layer independence",
+    "Must work without PM tool configured (graceful degradation)",
+    "Context budget model (ContextBudget) lives in executor.models"
+  ],
+  "stakeholder_profile": {
+    "working_style": "Terminal-first, IDE + Claude Code. Prefers high autonomy with easy override when things go off-rails.",
+    "values": [
+      "Speed through clarity — front-load specs so coding is fast",
+      "Quality code over random code — TDD, linting, type checking",
+      "Self-validating systems — agents should try to figure it out before escalating",
+      "Minimal typing — CLI tools, aliases, keyboard shortcuts"
+    ],
+    "pain_points": [
+      "Agents going off-rails when requirements are vague",
+      "Wasted context on discovery instead of building",
+      "Multiple agents overwriting each other's work",
+      "Re-explaining errors and decisions to new agent sessions",
+      "Merge complexity from too many concurrent changes"
+    ],
+    "priorities": [
+      "Front-load spec quality so agents can one-shot features",
+      "Small features fast with tight context over big multi-file refactors",
+      "Decision logging so knowledge isn't lost between sessions",
+      "Validation pipeline catches issues before commit"
+    ],
+    "technical_preferences": [
+      "Python for orchestration",
+      "Subprocess for external tool calls (not library imports)",
+      "Git worktrees for isolation",
+      "Structured output (JSON) as the API contract",
+      "Three-tier TDD: unit, integration, smoke"
+    ]
+  },
+  "metadata": {
+    "interview_date": "2026-02-16",
+    "mode": "direct",
+    "completeness_score": 90,
+    "domain": "software-requirements",
+    "question_count": 10
+  }
+}

@@ -47,6 +47,9 @@ def main(
     ] = OutputFormat.human,
 ) -> None:
     """Imp — AI-powered engineering workflow framework."""
+    from dotenv import load_dotenv
+
+    load_dotenv()
 
 
 def _not_implemented(name: str) -> None:
@@ -298,22 +301,33 @@ def plan(
         str,
         typer.Option("--priority", help="Default ticket priority"),
     ] = "medium",
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Force re-creation even if already planned"),
+    ] = False,
     format: Annotated[
         OutputFormat,
         typer.Option("--format", "-f", help="Output format"),
     ] = OutputFormat.human,
+    project_root: Annotated[
+        str | None,
+        typer.Option("--project-root", "-p", help="Project root directory"),
+    ] = None,
 ) -> None:
     """Generate PM tickets from an interview spec."""
     from pathlib import Path
 
     from imp.pm.cli import plan_command
 
+    root = Path(project_root) if project_root else Path.cwd()
     exit_code = plan_command(
         spec_file=Path(spec_file),
         provider=provider,
         create_parent=parent,
         default_priority=priority,
         format=format.value,
+        project_root=root,
+        force=force,
     )
     raise typer.Exit(exit_code)
 
