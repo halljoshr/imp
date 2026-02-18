@@ -1,6 +1,13 @@
 """Tests for provider configuration models."""
 
-from imp.providers.config import ModelRoster, ProviderConfig
+import os
+import sys
+import types
+from unittest.mock import patch
+
+import pytest
+
+from imp.providers.config import ModelRoster, ProviderConfig, resolve_default_model
 
 
 class TestProviderConfig:
@@ -84,3 +91,79 @@ class TestModelRoster:
         roster = ModelRoster()
         assert hasattr(roster, "coding")
         assert isinstance(roster.coding, ProviderConfig)
+
+
+class TestResolveDefaultModel:
+    """Test resolve_default_model auto-detection."""
+
+    def test_anthropic_api_key_returns_anthropic_model(self) -> None:
+        """When ANTHROPIC_API_KEY is set, returns anthropic:claude-opus-4-6."""
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-123"}):
+            result = resolve_default_model()
+        assert result == "anthropic:claude-opus-4-6"
+
+    def test_no_api_key_with_sdk_returns_claude_agent_sdk(self) -> None:
+        """When no API key but SDK importable, returns claude-agent-sdk."""
+        old_val = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            fake_sdk = types.ModuleType("claude_agent_sdk")
+            with patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}):
+                result = resolve_default_model()
+            assert result == "claude-agent-sdk"
+        finally:
+            if old_val is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_val
+
+    def test_api_key_takes_priority_over_sdk(self) -> None:
+        """API key is preferred even when SDK is available."""
+        fake_sdk = types.ModuleType("claude_agent_sdk")
+        with (
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-456"}),
+            patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}),
+        ):
+            result = resolve_default_model()
+        assert result == "anthropic:claude-opus-4-6"
+
+    def test_empty_api_key_is_not_set(self) -> None:
+        """Empty string ANTHROPIC_API_KEY is treated as not set."""
+        old_val = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            os.environ["ANTHROPIC_API_KEY"] = ""
+            fake_sdk = types.ModuleType("claude_agent_sdk")
+            with patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}):
+                result = resolve_default_model()
+            # Empty string is falsy, so should fall through to SDK check
+            assert result == "claude-agent-sdk"
+        finally:
+            if old_val is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_val
+            else:
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    def test_no_api_key_no_sdk_raises_runtime_error(self) -> None:
+        """When no API key and no SDK, raises RuntimeError with instructions."""
+        old_val = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            with (
+                patch.dict(sys.modules, {"claude_agent_sdk": None}),
+                pytest.raises(RuntimeError, match="No AI provider configured"),
+            ):
+                resolve_default_model()
+        finally:
+            if old_val is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_val
+
+    def test_error_message_includes_instructions(self) -> None:
+        """Error message tells user what to do."""
+        old_val = os.environ.pop("ANTHROPIC_API_KEY", None)
+        try:
+            with (
+                patch.dict(sys.modules, {"claude_agent_sdk": None}),
+                pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY") as exc_info,
+            ):
+                resolve_default_model()
+            assert "--model" in str(exc_info.value)
+            assert "claude-agent-sdk" in str(exc_info.value)
+        finally:
+            if old_val is not None:
+                os.environ["ANTHROPIC_API_KEY"] = old_val

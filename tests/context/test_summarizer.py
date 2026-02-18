@@ -428,3 +428,53 @@ async def test_summarize_project_with_model_name() -> None:
 
     entry = summaries["src/"]
     assert entry.model_used == "anthropic:claude-haiku-4-5"
+
+
+@pytest.mark.asyncio
+async def test_summarize_project_request_count_with_cache() -> None:
+    """Test requests count equals AI calls made, not total minus cached."""
+    from imp.context.summarizer import summarize_project
+    from imp.context.summary_cache import SummaryEntry
+
+    modules = [_make_module(path="src/"), _make_module(path="tests/")]
+    scan = _make_scan(modules)
+
+    # Cache one module
+    cached = {
+        "src/": SummaryEntry(
+            purpose="Cached.",
+            summarized_at=datetime.now(UTC),
+            model_used="test",
+        ),
+    }
+    _, _, usage = await summarize_project(scan, _mock_invoke, cached_summaries=cached)
+
+    # Only tests/ should have been an AI request
+    assert usage.requests == 1
+
+
+@pytest.mark.asyncio
+async def test_summarize_project_stale_cache_no_negative_requests() -> None:
+    """Test requests count is non-negative even when cache has stale entries."""
+    from imp.context.summarizer import summarize_project
+    from imp.context.summary_cache import SummaryEntry
+
+    # Only one module exists now
+    scan = _make_scan([_make_module(path="src/")])
+
+    # Cache has entries for modules that no longer exist
+    cached = {
+        "src/": SummaryEntry(
+            purpose="Cached.", summarized_at=datetime.now(UTC), model_used="test"
+        ),
+        "old_module/": SummaryEntry(
+            purpose="Stale.", summarized_at=datetime.now(UTC), model_used="test"
+        ),
+        "deleted/": SummaryEntry(
+            purpose="Gone.", summarized_at=datetime.now(UTC), model_used="test"
+        ),
+    }
+    _, _, usage = await summarize_project(scan, _mock_invoke, cached_summaries=cached)
+
+    # src/ was cached, no AI calls made — requests must be 0, not -2
+    assert usage.requests == 0

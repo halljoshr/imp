@@ -251,9 +251,9 @@ def review(
         typer.Option("--provider", help="AI provider (default: anthropic)"),
     ] = "anthropic",
     model: Annotated[
-        str,
-        typer.Option("--model", "-m", help="AI model (default: claude-opus-4-6)"),
-    ] = "claude-opus-4-6",
+        str | None,
+        typer.Option("--model", "-m", help="AI model (auto-detected if not set)"),
+    ] = None,
     format: Annotated[
         OutputFormat,
         typer.Option("--format", "-f", help="Output format"),
