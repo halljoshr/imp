@@ -30,6 +30,21 @@ class WorktreeManager:
             raise WorktreeError(str(exc)) from exc
         return result
 
+    def current_branch(self) -> str:
+        """Get the current git branch name.
+
+        Returns:
+            The current branch name (e.g. 'main', 'feat/executor').
+
+        Raises:
+            WorktreeError: If the git command fails.
+        """
+        cmd = ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        result = self._run(cmd)
+        if result.returncode != 0:
+            raise WorktreeError(result.stderr)
+        return result.stdout.strip()
+
     def create(self, ticket_id: str, base_branch: str = "main") -> Path:
         """Create a new worktree for the ticket. Returns the worktree path."""
         worktree_path = f".trees/{ticket_id}"

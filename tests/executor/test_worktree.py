@@ -366,6 +366,48 @@ class TestWorktreeManagerDeleteBranch:
             manager.delete_branch("IMP-GONE")
 
 
+class TestWorktreeManagerCurrentBranch:
+    """Test current_branch() method."""
+
+    def test_current_branch_returns_branch_name(self, tmp_path: Path) -> None:
+        """current_branch() returns the current git branch name."""
+        manager = _make_manager(tmp_path)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "feat/executor\n"
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            branch = manager.current_branch()
+
+        assert branch == "feat/executor"
+        cmd = mock_run.call_args[0][0]
+        assert "rev-parse" in cmd
+        assert "--abbrev-ref" in cmd
+        assert "HEAD" in cmd
+
+    def test_current_branch_strips_whitespace(self, tmp_path: Path) -> None:
+        """current_branch() strips trailing whitespace from output."""
+        manager = _make_manager(tmp_path)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "  main  \n"
+
+        with patch("subprocess.run", return_value=mock_result):
+            branch = manager.current_branch()
+
+        assert branch == "main"
+
+    def test_current_branch_raises_on_failure(self, tmp_path: Path) -> None:
+        """current_branch() raises WorktreeError on non-zero exit."""
+        manager = _make_manager(tmp_path)
+        mock_result = MagicMock()
+        mock_result.returncode = 128
+        mock_result.stderr = "fatal: not a git repo"
+
+        with patch("subprocess.run", return_value=mock_result), pytest.raises(WorktreeError):
+            manager.current_branch()
+
+
 class TestWorktreeError:
     """Test WorktreeError custom exception."""
 

@@ -92,6 +92,18 @@ class CompletionPipeline:
             attempts=attempts,
         )
 
+    @staticmethod
+    def _subprocess_env() -> dict[str, str]:
+        """Return a clean env for worktree subprocesses.
+
+        Strips VIRTUAL_ENV so uv picks up the worktree's own venv rather than
+        inheriting the parent process's venv path.
+        """
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("VIRTUAL_ENV_PROMPT", None)
+        return env
+
     def _run_check(self, worktree_path: Path) -> tuple[bool, str]:
         """Run 'imp check' in the worktree directory."""
         result = subprocess.run(
@@ -99,6 +111,7 @@ class CompletionPipeline:
             cwd=worktree_path,
             capture_output=True,
             text=True,
+            env=self._subprocess_env(),
         )
         output = result.stdout + result.stderr
         return result.returncode == 0, output
@@ -110,6 +123,7 @@ class CompletionPipeline:
             cwd=worktree_path,
             capture_output=True,
             text=True,
+            env=self._subprocess_env(),
         )
         return result.returncode == 0, result.stdout
 

@@ -20,11 +20,11 @@ from imp.context.models import (
 
 # Optional tree-sitter support
 try:
-    import tree_sitter  # type: ignore[import-not-found]
+    import tree_sitter  # pragma: no cover
 
     TREE_SITTER_AVAILABLE = True  # pragma: no cover
 except ImportError:
-    tree_sitter = None
+    tree_sitter = None  # type: ignore[assignment]
     TREE_SITTER_AVAILABLE = False
 
 
@@ -262,7 +262,7 @@ def parse_typescript(path: str, source: str) -> ModuleInfo:
 
     # TODO: Implement actual tree-sitter parsing
     # For v0.1, just return basic structure with graceful fallback
-    return ModuleInfo(  # pragma: no cover — tree-sitter not installed in dev env
+    return ModuleInfo(  # pragma: no cover
         file_info=file_info,
         parse_error="TypeScript parsing not yet implemented",
     )

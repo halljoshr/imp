@@ -71,6 +71,31 @@ class TestStartCommand:
         mock_store.save.assert_called_once()
         mock_worktree_mgr.create.assert_called_once()
 
+    def test_syncs_all_extras_after_worktree_creation(self, tmp_path: Path) -> None:
+        """start_command runs uv sync --all-extras in the worktree after creation."""
+        mock_store = MagicMock()
+        mock_store.load.return_value = None
+        mock_worktree_mgr = MagicMock()
+        worktree_path = tmp_path / ".trees" / "IMP-1s"
+        mock_worktree_mgr.create.return_value = worktree_path
+        mock_worktree_mgr.current_branch.return_value = "main"
+        mock_ctx_gen = MagicMock()
+
+        with (
+            patch("imp.executor.cli.SessionStore", return_value=mock_store),
+            patch("imp.executor.cli.WorktreeManager", return_value=mock_worktree_mgr),
+            patch("imp.executor.cli.ContextGenerator", return_value=mock_ctx_gen),
+            patch("imp.executor.cli.subprocess") as mock_subprocess,
+        ):
+            mock_subprocess.run.return_value = MagicMock(returncode=0)
+            start_command(ticket_id="IMP-1s", title="Sync test", project_root=tmp_path)
+
+        calls = mock_subprocess.run.call_args_list
+        sync_call = next((c for c in calls if "uv" in c.args[0] and "sync" in c.args[0]), None)
+        assert sync_call is not None, "uv sync --all-extras should be called"
+        assert "--all-extras" in sync_call.args[0]
+        assert sync_call.kwargs.get("cwd") == worktree_path
+
     def test_returns_0_on_success(self, tmp_path: Path) -> None:
         """start_command returns exit code 0 on success."""
         mock_store = MagicMock()
@@ -135,12 +160,13 @@ class TestStartCommand:
         assert result == 1
         mock_worktree_mgr.create.assert_not_called()
 
-    def test_uses_default_base_branch_main(self, tmp_path: Path) -> None:
-        """start_command uses 'main' as the default base branch."""
+    def test_auto_detects_current_branch_when_none(self, tmp_path: Path) -> None:
+        """start_command auto-detects current branch when base_branch is None."""
         mock_store = MagicMock()
         mock_store.load.return_value = None
         mock_worktree_mgr = MagicMock()
         mock_worktree_mgr.create.return_value = tmp_path / ".trees" / "IMP-5"
+        mock_worktree_mgr.current_branch.return_value = "feat/executor"
         mock_ctx_gen = MagicMock()
 
         with (
@@ -151,16 +177,37 @@ class TestStartCommand:
             start_command(
                 ticket_id="IMP-5",
                 title="Base branch test",
+                base_branch=None,
                 project_root=tmp_path,
             )
 
+        mock_worktree_mgr.current_branch.assert_called_once()
         create_call = mock_worktree_mgr.create.call_args
-        # base_branch should be "main" by default
-        if create_call.kwargs:
-            assert create_call.kwargs.get("base_branch", "main") == "main"
-        else:
-            # Positional: create(ticket_id, base_branch)
-            assert len(create_call.args) < 3 or create_call.args[1] == "main"
+        assert create_call.kwargs.get("base_branch") == "feat/executor"
+
+    def test_skips_auto_detect_when_base_branch_provided(self, tmp_path: Path) -> None:
+        """start_command does not auto-detect when base_branch is explicit."""
+        mock_store = MagicMock()
+        mock_store.load.return_value = None
+        mock_worktree_mgr = MagicMock()
+        mock_worktree_mgr.create.return_value = tmp_path / ".trees" / "IMP-5b"
+        mock_ctx_gen = MagicMock()
+
+        with (
+            patch("imp.executor.cli.SessionStore", return_value=mock_store),
+            patch("imp.executor.cli.WorktreeManager", return_value=mock_worktree_mgr),
+            patch("imp.executor.cli.ContextGenerator", return_value=mock_ctx_gen),
+        ):
+            start_command(
+                ticket_id="IMP-5b",
+                title="Explicit branch",
+                base_branch="develop",
+                project_root=tmp_path,
+            )
+
+        mock_worktree_mgr.current_branch.assert_not_called()
+        create_call = mock_worktree_mgr.create.call_args
+        assert create_call.kwargs.get("base_branch") == "develop"
 
     def test_uses_cwd_as_project_root_when_none(self) -> None:
         """start_command uses cwd as project_root when not provided."""

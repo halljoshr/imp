@@ -70,14 +70,31 @@ class TestRunCheck:
             mock_run.return_value = _completed_process(returncode=0, stdout="All checks passed")
             passed, output = pipeline._run_check(worktree)
 
-        mock_run.assert_called_once_with(
-            ["imp", "check"],
-            cwd=worktree,
-            capture_output=True,
-            text=True,
-        )
+        call_kwargs = mock_run.call_args.kwargs
+        assert mock_run.call_args.args[0] == ["imp", "check"]
+        assert call_kwargs["cwd"] == worktree
+        assert call_kwargs["capture_output"] is True
+        assert call_kwargs["text"] is True
         assert passed is True
         assert "All checks passed" in output
+
+    def test_run_check_strips_virtual_env_from_env(self, tmp_path: Path) -> None:
+        """_run_check removes VIRTUAL_ENV from subprocess env to avoid venv conflicts."""
+        import os
+
+        pipeline = CompletionPipeline(project_root=tmp_path)
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.dict(os.environ, {"VIRTUAL_ENV": "/some/parent/venv"}),
+        ):
+            mock_run.return_value = _completed_process(returncode=0)
+            pipeline._run_check(worktree)
+
+        env_passed = mock_run.call_args.kwargs.get("env", {})
+        assert "VIRTUAL_ENV" not in env_passed
 
     def test_run_check_returns_false_on_nonzero_exit(self, tmp_path: Path) -> None:
         """_run_check returns (False, output) when imp check fails."""
@@ -127,12 +144,11 @@ class TestRunReview:
             mock_run.return_value = _completed_process(returncode=0, stdout='{"passed": true}')
             passed, _output = pipeline._run_review(worktree)
 
-        mock_run.assert_called_once_with(
-            ["imp", "review", "--format", "json"],
-            cwd=worktree,
-            capture_output=True,
-            text=True,
-        )
+        call_kwargs = mock_run.call_args.kwargs
+        assert mock_run.call_args.args[0] == ["imp", "review", "--format", "json"]
+        assert call_kwargs["cwd"] == worktree
+        assert call_kwargs["capture_output"] is True
+        assert call_kwargs["text"] is True
         assert passed is True
 
     def test_run_review_returns_false_on_review_issues(self, tmp_path: Path) -> None:

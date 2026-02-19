@@ -363,20 +363,37 @@ def code_start(
         typer.Option("--description", "-d", help="Ticket description"),
     ] = "",
     base_branch: Annotated[
-        str,
+        str | None,
         typer.Option("--base-branch", "-b", help="Base branch for the worktree"),
-    ] = "main",
+    ] = None,
     project_root: Annotated[
         str | None,
         typer.Option("--project-root", "-p", help="Project root directory"),
     ] = None,
 ) -> None:
     """Start a new managed executor session for a ticket."""
+    import subprocess
     from pathlib import Path
 
     from imp.executor.cli import start_command
 
     root = Path(project_root) if project_root else None
+
+    # Interactive branch selection when --base-branch not provided
+    if base_branch is None:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        detected = result.stdout.strip() if result.returncode == 0 else "main"
+        rprint(f"Base branch: [bold]{detected}[/bold]")
+        if typer.confirm("Use a different base branch?", default=False):
+            base_branch = typer.prompt("Base branch")
+        else:
+            base_branch = detected
+
     exit_code = start_command(
         ticket_id=ticket_id,
         title=title,

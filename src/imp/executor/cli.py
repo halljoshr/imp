@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import subprocess
 from pathlib import Path
 
 from imp.executor.context import ContextGenerator
@@ -18,10 +19,14 @@ def start_command(
     ticket_id: str,
     title: str,
     description: str = "",
-    base_branch: str = "main",
+    base_branch: str | None = None,
     project_root: Path | None = None,
 ) -> int:
     """Start a new executor session for a ticket.
+
+    Args:
+        base_branch: Branch to base the worktree on. If None, auto-detects
+            the current branch.
 
     Returns 0 on success, 1 on error or if session already active.
     """
@@ -29,6 +34,10 @@ def start_command(
     store = SessionStore(root)
     worktree_mgr = WorktreeManager(root)
     ctx_gen = ContextGenerator(root)
+
+    # Auto-detect current branch if not specified
+    if base_branch is None:
+        base_branch = worktree_mgr.current_branch()
 
     # Check for existing active session
     existing = store.load(ticket_id)
@@ -48,6 +57,15 @@ def start_command(
         description=description,
     )
     store.save(session)
+
+    # Sync all extras so optional deps (plane-sdk, claude-agent-sdk, etc.) are
+    # available for imp check / imp review inside the worktree (best-effort).
+    with contextlib.suppress(Exception):
+        subprocess.run(
+            ["uv", "sync", "--all-extras"],
+            cwd=worktree_path,
+            capture_output=True,
+        )
 
     # Generate and write TASK.md into the worktree (best-effort)
     with contextlib.suppress(Exception):
