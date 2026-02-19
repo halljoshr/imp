@@ -19,7 +19,7 @@ def review_command(
     project_root: Path,
     changed_files: list[str] | None = None,
     provider: str = "anthropic",
-    model: str = "claude-opus-4-6",
+    model: str | None = None,
     format: str = "human",
 ) -> int:
     """Run code review on a project.
@@ -28,7 +28,7 @@ def review_command(
         project_root: Root directory of the project
         changed_files: Optional list of files to review (all if None)
         provider: AI provider to use (default: anthropic)
-        model: AI model to use (default: claude-opus-4-6)
+        model: AI model to use (auto-detected if None)
         format: Output format: "human", "json", or "jsonl"
 
     Returns:
@@ -48,10 +48,16 @@ def review_command(
 
         from pydantic_ai.models import KnownModelName
 
+        from imp.providers.config import resolve_default_model
         from imp.review.prompts import get_system_prompt
 
-        # Handle claude-agent-sdk separately (no provider prefix)
-        model_str = model if model == "claude-agent-sdk" else f"{provider}:{model}"
+        # Resolve model: auto-detect if not specified, otherwise build full string
+        if model is None:
+            model_str = resolve_default_model()
+        elif model == "claude-agent-sdk":
+            model_str = model
+        else:
+            model_str = f"{provider}:{model}"
 
         ai_provider: PydanticAIProvider[ReviewResult, None] = PydanticAIProvider(
             model=cast(KnownModelName, model_str),

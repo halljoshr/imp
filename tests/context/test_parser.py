@@ -349,7 +349,10 @@ class TestParseTypescript:
 
     def test_typescript_not_installed(self):
         """Handle tree-sitter not installed."""
-        with patch("imp.context.parser.tree_sitter", None):
+        with (
+            patch("imp.context.parser.tree_sitter", None),
+            patch("imp.context.parser.TREE_SITTER_AVAILABLE", False),
+        ):
             result = parse_typescript("test.ts", "function foo() {}")
 
             assert result.parse_error is not None

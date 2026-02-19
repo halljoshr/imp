@@ -579,13 +579,14 @@ class TestCLIIntegration:
                 TicketRef(ticket_id="child-id", ticket_number="CLI-2", url="http://test/CLI-2"),
             ]
 
-            # Run plan_command
+            # Run plan_command (use tmp_path as project_root to avoid stale receipts)
             exit_code = plan_command(
                 spec_file=spec_file,
                 provider="plane",
                 create_parent=True,
                 default_priority="medium",
                 format="json",
+                project_root=tmp_path,
             )
 
             # Verify success

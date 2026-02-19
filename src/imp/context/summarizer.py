@@ -127,6 +127,7 @@ async def summarize_project(
     total_input = 0
     total_output = 0
     total_tokens = 0
+    total_requests = 0
     summaries: dict[str, SummaryEntry] = {}
     enriched_modules: list[DirectoryModule] = []
 
@@ -143,6 +144,7 @@ async def summarize_project(
         total_input += usage.input_tokens
         total_output += usage.output_tokens
         total_tokens += usage.total_tokens
+        total_requests += 1
 
         enriched_modules.append(module.model_copy(update={"purpose": purpose}))
         summaries[module.path] = SummaryEntry(
@@ -156,7 +158,7 @@ async def summarize_project(
         input_tokens=total_input,
         output_tokens=total_output,
         total_tokens=total_tokens,
-        requests=len(scan.modules) - len(cached_summaries),
+        requests=total_requests,
     )
 
     return enriched_scan, summaries, total_usage
